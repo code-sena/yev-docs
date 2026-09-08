@@ -1,0 +1,844 @@
+openapi: 3.0.3
+info:
+  title: Seating Service API
+  version: 1.0.0
+  description: |
+    Servicio de gestión de asientos en tiempo real: secciones, asientos, reservas temporales y WebSockets.
+    
+    ## Funcionalidades principales
+    - **Gestión de secciones** → Crear y configurar secciones del venue (platea, palco, general)
+    - **Gestión de asientos** → CRUD de asientos individuales con coordenadas
+    - **Estados en tiempo real** → available, reserved, sold, blocked
+    - **Reservas temporales** → Bloqueo por 15 minutos durante compra
+    - **WebSocket updates** → Notificaciones inmediatas de cambios de estado
+    - **Liberación automática** → Background job para expirar reservas
+
+    ## Estados de asiento
+    - `available` → Disponible para reservar
+    - `reserved` → Reservado temporalmente (15 min)
+    - `sold` → Vendido y ocupado permanentemente  
+    - `blocked` → Bloqueado por administrador (mantenimiento, etc.)
+
+    ## WebSocket Events
+    - `SEAT_STATUS_CHANGED` → Cambio de estado de asiento
+    - `SEAT_RESERVED` → Nuevo asiento reservado
+    - `SEAT_RELEASED` → Reserva expirada o liberada
+    - `SECTION_UPDATED` → Configuración de sección modificada
+
+servers:
+  - url: http://localhost:8083
+    description: Local development  
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+  - url: https://api.{domain}/api/v1
+    description: Production
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Sections
+    description: Gestión de secciones del venue
+  - name: Seats
+    description: Gestión de asientos individuales
+  - name: Reservations
+    description: Reservas temporales de asientos
+  - name: WebSocket
+    description: Conexiones WebSocket para tiempo real
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  database:
+                    type: string
+                    enum: [connected, disconnected]
+                  redis:
+                    type: string  
+                    enum: [connected, disconnected]
+                  websocket:
+                    type: string
+                    enum: [active, inactive]
+
+  /events/{eventId}/sections:
+    get:
+      summary: Listar secciones del evento
+      description: Retorna todas las secciones configuradas para el evento con estadísticas de ocupación.
+      tags: [Sections]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Lista de secciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SectionResponse'
+        '404':
+          description: Evento no encontrado
+
+    post:
+      summary: Crear sección
+      description: Crea nueva sección dentro del evento. Solo organizadores del evento o administradores.
+      tags: [Sections]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSectionRequest'
+            example:
+              name: "Platea"
+              sectionType: "STANDARD"
+              capacity: 500
+              basePrice: 150000
+              coordinates:
+                x: 100
+                y: 200
+                width: 300
+                height: 200
+      responses:
+        '201':
+          description: Sección creada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionResponse'
+        '400':
+          $ref: '../contracts/openapi/_shared.yaml#/components/responses/BadRequest'
+        '403':
+          description: Sin permisos para modificar este evento
+
+  /events/{eventId}/sections/{sectionId}:
+    get:
+      summary: Obtener sección por ID
+      tags: [Sections]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Detalles de la sección
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionResponse'
+
+    patch:
+      summary: Actualizar sección
+      description: Actualización parcial de sección. Solo organizadores del evento.
+      tags: [Sections]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSectionRequest'
+      responses:
+        '200':
+          description: Sección actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectionResponse'
+
+  /events/{eventId}/sections/{sectionId}/seats:
+    get:
+      summary: Listar asientos de la sección
+      description: Retorna asientos con estados actuales. Incluye filtros por estado y tipo.
+      tags: [Seats]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: status
+          in: query
+          description: Filtrar por estado de asiento
+          schema:
+            type: string
+            enum: [available, reserved, sold, blocked]
+        - name: seatType
+          in: query
+          description: Filtrar por tipo de asiento
+          schema:
+            type: string
+            enum: [standard, vip, accessible]
+      security: []
+      responses:
+        '200':
+          description: Lista de asientos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SeatResponse'
+                  meta:
+                    type: object
+                    properties:
+                      totalSeats:
+                        type: integer
+                        example: 500
+                      availableSeats:
+                        type: integer
+                        example: 342
+                      reservedSeats:
+                        type: integer
+                        example: 15
+                      soldSeats:
+                        type: integer
+                        example: 143
+
+    post:
+      summary: Crear asiento
+      description: Crea nuevo asiento en la sección. Solo organizadores del evento.
+      tags: [Seats]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSeatRequest'
+      responses:
+        '201':
+          description: Asiento creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatResponse'
+
+  /events/{eventId}/sections/{sectionId}/seats/bulk:
+    post:
+      summary: Crear asientos en lote
+      description: Crea múltiples asientos usando patrón de filas y columnas. Optimizado para venues grandes.
+      tags: [Seats]
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkCreateSeatsRequest'
+            example:
+              rows: 20
+              seatsPerRow: 25
+              rowPrefix: "F"
+              seatPrefix: "A"
+              seatType: "standard"
+              priceMultiplier: 1.0
+              startCoordinates:
+                x: 100
+                y: 100
+              seatSpacing:
+                x: 30
+                y: 35
+      responses:
+        '201':
+          description: Asientos creados en lote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  createdSeats:
+                    type: integer
+                    example: 500
+                  message:
+                    type: string
+                    example: "500 asientos creados exitosamente"
+
+  /seats/{seatId}:
+    get:
+      summary: Obtener asiento por ID
+      tags: [Seats]
+      parameters:
+        - name: seatId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Detalles del asiento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatResponse'
+
+    patch:
+      summary: Actualizar asiento
+      description: Actualiza propiedades del asiento (no estado). Para cambio de estado usar endpoints de reserva.
+      tags: [Seats]
+      parameters:
+        - name: seatId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSeatRequest'
+      responses:
+        '200':
+          description: Asiento actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatResponse'
+
+  /seats/{seatId}/reserve:
+    post:
+      summary: Reservar asiento temporalmente
+      description: |
+        Reserva asiento por 15 minutos para completar proceso de compra.
+        Si el usuario ya tiene reservas activas, las extiende automáticamente.
+      tags: [Reservations]
+      parameters:
+        - name: seatId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Asiento reservado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '409':
+          description: Asiento ya reservado o vendido
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: SEAT_NOT_AVAILABLE
+                message: El asiento seleccionado ya no está disponible
+
+  /seats/{seatId}/release:
+    post:
+      summary: Liberar reserva de asiento
+      description: Libera manualmente una reserva antes de expiración. Solo el usuario que reservó.
+      tags: [Reservations]
+      parameters:
+        - name: seatId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '204':
+          description: Reserva liberada exitosamente
+        '400':
+          description: Asiento no está reservado por este usuario
+        '404':
+          description: Asiento no encontrado
+
+  /seats/bulk/reserve:
+    post:
+      summary: Reservar múltiples asientos
+      description: |
+        Reserva múltiples asientos en una transacción atómica. 
+        Si algún asiento no está disponible, falla toda la operación.
+      tags: [Reservations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seatIds]
+              properties:
+                seatIds:
+                  type: array
+                  items:
+                    $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+                  minItems: 1
+                  maxItems: 10
+                  description: Lista de IDs de asientos a reservar (máximo 10)
+            example:
+              seatIds:
+                - "550e8400-e29b-41d4-a716-446655440001"
+                - "550e8400-e29b-41d4-a716-446655440002"
+      responses:
+        '200':
+          description: Asientos reservados exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReservationResponse'
+                  expiresAt:
+                    $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        '409':
+          description: Uno o más asientos no disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: SEATS_NOT_AVAILABLE
+                  message:
+                    type: string
+                    example: Algunos asientos seleccionados ya no están disponibles
+                  unavailableSeats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        seatId:
+                          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+                        currentStatus:
+                          type: string
+                          enum: [reserved, sold, blocked]
+
+  /users/me/reservations:
+    get:
+      summary: Obtener reservas activas del usuario
+      description: Lista todas las reservas temporales activas del usuario autenticado.
+      tags: [Reservations]
+      responses:
+        '200':
+          description: Reservas activas del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReservationResponse'
+                  meta:
+                    type: object
+                    properties:
+                      totalReservations:
+                        type: integer
+                        example: 3
+                      totalExpiringInMinutes:
+                        type: integer
+                        description: Reservas que expiran en los próximos 5 minutos
+                        example: 1
+
+    delete:
+      summary: Liberar todas las reservas del usuario
+      description: Libera todas las reservas activas del usuario autenticado.
+      tags: [Reservations]
+      responses:
+        '204':
+          description: Todas las reservas liberadas
+        '404':
+          description: Usuario no tiene reservas activas
+
+components:
+  schemas:
+    # ─── Section Schemas ──────────────────────────────────────────────
+    CreateSectionRequest:
+      type: object
+      required: [name, sectionType, capacity, basePrice]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Nombre de la sección
+          example: "Platea"
+        sectionType:
+          type: string
+          enum: [STANDARD, VIP, ACCESSIBLE, GENERAL]
+          description: Tipo de sección
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 50000
+          description: Capacidad total de la sección
+        basePrice:
+          type: number
+          minimum: 0
+          description: Precio base por asiento (COP)
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+          description: Coordenadas para layout gráfico
+
+    UpdateSectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 50000
+        basePrice:
+          type: number
+          minimum: 0
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+
+    SectionResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, eventId, name, sectionType, capacity, basePrice]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            eventId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Platea"
+            sectionType:
+              type: string
+              enum: [STANDARD, VIP, ACCESSIBLE, GENERAL]
+            capacity:
+              type: integer
+              example: 500
+            basePrice:
+              type: number
+              example: 150000
+            coordinates:
+              $ref: '#/components/schemas/Coordinates'
+            occupancy:
+              $ref: '#/components/schemas/SectionOccupancy'
+
+    # ─── Seat Schemas ─────────────────────────────────────────────────
+    CreateSeatRequest:
+      type: object
+      required: [row, number, seatType, coordinates]
+      properties:
+        row:
+          type: string
+          maxLength: 10
+          description: Identificador de fila
+          example: "F15"
+        number:
+          type: string
+          maxLength: 10
+          description: Número de asiento en la fila
+          example: "A23"
+        seatType:
+          type: string
+          enum: [standard, vip, accessible]
+          description: Tipo de asiento
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+          description: Posición exacta en el layout
+        priceMultiplier:
+          type: number
+          minimum: 0.1
+          maximum: 10.0
+          default: 1.0
+          description: Multiplicador del precio base de la sección
+
+    UpdateSeatRequest:
+      type: object
+      properties:
+        row:
+          type: string
+          maxLength: 10
+        number:
+          type: string
+          maxLength: 10
+        seatType:
+          type: string
+          enum: [standard, vip, accessible]
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+        priceMultiplier:
+          type: number
+          minimum: 0.1
+          maximum: 10.0
+
+    BulkCreateSeatsRequest:
+      type: object
+      required: [rows, seatsPerRow, rowPrefix, seatPrefix, seatType, startCoordinates, seatSpacing]
+      properties:
+        rows:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Número de filas a crear
+        seatsPerRow:
+          type: integer
+          minimum: 1
+          maximum: 200
+          description: Asientos por fila
+        rowPrefix:
+          type: string
+          maxLength: 5
+          description: Prefijo para identificador de fila
+          example: "F"
+        seatPrefix:
+          type: string
+          maxLength: 5
+          description: Prefijo para número de asiento
+          example: "A"
+        seatType:
+          type: string
+          enum: [standard, vip, accessible]
+        priceMultiplier:
+          type: number
+          minimum: 0.1
+          maximum: 10.0
+          default: 1.0
+        startCoordinates:
+          $ref: '#/components/schemas/Coordinates'
+          description: Coordenadas del primer asiento
+        seatSpacing:
+          $ref: '#/components/schemas/Coordinates'
+          description: Espacio entre asientos (x) y filas (y)
+
+    SeatResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, sectionId, row, number, status, seatType, coordinates, finalPrice]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            sectionId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            row:
+              type: string
+              example: "F15"
+            number:
+              type: string
+              example: "A23"
+            status:
+              type: string
+              enum: [available, reserved, sold, blocked]
+              description: Estado actual del asiento
+            seatType:
+              type: string
+              enum: [standard, vip, accessible]
+            coordinates:
+              $ref: '#/components/schemas/Coordinates'
+            priceMultiplier:
+              type: number
+              example: 1.2
+            finalPrice:
+              type: number
+              description: Precio final calculado (basePrice * priceMultiplier)
+              example: 180000
+            reservation:
+              $ref: '#/components/schemas/ActiveReservation'
+              nullable: true
+              description: Información de reserva activa (si aplica)
+
+    # ─── Reservation Schemas ──────────────────────────────────────────
+    ReservationResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, seatId, userId, status, expiresAt]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            seatId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            status:
+              type: string
+              enum: [active, expired, completed, cancelled]
+            expiresAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              description: Momento de expiración de la reserva
+            seat:
+              $ref: '#/components/schemas/SeatSummary'
+
+    ActiveReservation:
+      type: object
+      required: [reservedBy, expiresAt]
+      properties:
+        reservedBy:
+          type: string
+          description: Nombre del usuario que reservó (solo para admin/organizador)
+          example: "María García"
+        expiresAt:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        remainingMinutes:
+          type: integer
+          description: Minutos restantes hasta expiración
+          example: 12
+
+    # ─── Supporting Schemas ───────────────────────────────────────────
+    Coordinates:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+          description: Coordenada X en el layout
+          example: 100.5
+        y:
+          type: number
+          description: Coordenada Y en el layout
+          example: 200.0
+        width:
+          type: number
+          description: Ancho del elemento (opcional)
+          example: 30.0
+        height:
+          type: number
+          description: Alto del elemento (opcional)
+          example: 25.0
+
+    SectionOccupancy:
+      type: object
+      required: [totalSeats, availableSeats, reservedSeats, soldSeats, blockedSeats]
+      properties:
+        totalSeats:
+          type: integer
+          example: 500
+        availableSeats:
+          type: integer
+          example: 342
+        reservedSeats:
+          type: integer
+          example: 15
+        soldSeats:
+          type: integer
+          example: 143
+        blockedSeats:
+          type: integer
+          example: 0
+        occupancyPercentage:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          example: 31.6
+
+    SeatSummary:
+      type: object
+      required: [id, row, number, seatType, finalPrice]
+      properties:
+        id:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        row:
+          type: string
+          example: "F15"
+        number:
+          type: string
+          example: "A23"
+        seatType:
+          type: string
+          enum: [standard, vip, accessible]
+        finalPrice:
+          type: number
+          example: 180000
+        section:
+          type: object
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Platea"
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

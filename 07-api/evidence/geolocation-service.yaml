@@ -1,0 +1,291 @@
+openapi: 3.0.3
+info:
+  title: Geolocation Service API
+  version: 1.0.0
+  description: |
+    Servicio de geolocalización: gestión de departamentos, ciudades y venues.
+    
+    ## Funcionalidades principales
+    - **Estructura geográfica** → Departamentos y ciudades de Colombia
+    - **Gestión de venues** → Sitios donde se realizan eventos
+    - **Coordenadas GPS** → Ubicación exacta de venues
+    - **Capacidades** → Validación de aforo máximo
+    - **Búsqueda geográfica** → Filtros por ubicación
+
+servers:
+  - url: http://localhost:8089
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Departments
+    description: Gestión de departamentos
+  - name: Cities
+    description: Gestión de ciudades
+  - name: Venues
+    description: Gestión de venues/sitios
+  - name: Health
+    description: Health check
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+
+  /departments:
+    get:
+      summary: Listar departamentos
+      tags: [Departments]
+      security: []
+      responses:
+        '200':
+          description: Lista de departamentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DepartmentResponse'
+
+  /departments/{departmentId}/cities:
+    get:
+      summary: Listar ciudades del departamento
+      tags: [Cities]
+      parameters:
+        - name: departmentId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Lista de ciudades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CityResponse'
+
+  /cities/{cityId}/venues:
+    get:
+      summary: Listar venues de la ciudad
+      tags: [Venues]
+      parameters:
+        - name: cityId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Lista de venues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VenueResponse'
+
+  /venues:
+    post:
+      summary: Crear venue
+      tags: [Venues]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVenueRequest'
+      responses:
+        '201':
+          description: Venue creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueResponse'
+
+    get:
+      summary: Buscar venues
+      tags: [Venues]
+      parameters:
+        - name: q
+          in: query
+          description: Búsqueda por nombre
+          schema:
+            type: string
+        - name: city_id
+          in: query
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: min_capacity
+          in: query
+          schema:
+            type: integer
+      security: []
+      responses:
+        '200':
+          description: Resultados de búsqueda
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VenueResponse'
+
+  /venues/{venueId}:
+    get:
+      summary: Obtener venue por ID
+      tags: [Venues]
+      parameters:
+        - name: venueId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      security: []
+      responses:
+        '200':
+          description: Detalles del venue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueResponse'
+
+components:
+  schemas:
+    DepartmentResponse:
+      type: object
+      required: [id, name, code]
+      properties:
+        id:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          example: "Cundinamarca"
+        code:
+          type: string
+          example: "CUN"
+        citiesCount:
+          type: integer
+          example: 116
+
+    CityResponse:
+      type: object
+      required: [id, name, departmentId]
+      properties:
+        id:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          example: "Bogotá"
+        departmentId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        departmentName:
+          type: string
+          example: "Cundinamarca"
+        venuesCount:
+          type: integer
+          example: 25
+
+    CreateVenueRequest:
+      type: object
+      required: [name, cityId, address, capacity]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 200
+          example: "Estadio El Campín"
+        cityId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        address:
+          type: string
+          maxLength: 500
+          example: "Av. NQS #57-60"
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 200000
+          example: 40000
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+        description:
+          type: string
+          maxLength: 1000
+
+    VenueResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, name, cityId, address, capacity]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Estadio El Campín"
+            cityId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            cityName:
+              type: string
+              example: "Bogotá"
+            departmentName:
+              type: string
+              example: "Cundinamarca"
+            address:
+              type: string
+              example: "Av. NQS #57-60"
+            capacity:
+              type: integer
+              example: 40000
+            coordinates:
+              $ref: '#/components/schemas/Coordinates'
+            description:
+              type: string
+              nullable: true
+            eventsCount:
+              type: integer
+              example: 15
+
+    Coordinates:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+          example: 4.6351
+        longitude:
+          type: number
+          format: double
+          example: -74.0703
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

@@ -1,0 +1,241 @@
+openapi: 3.0.3
+info:
+  title: Profile Service API
+  version: 1.0.0
+  description: |
+    Servicio de gestión de perfiles de usuario: información personal, preferencias y configuraciones.
+    
+    ## Funcionalidades principales
+    - **Perfiles de usuario** → Información personal, avatar, biografía
+    - **Preferencias** → Idioma, tema visual, notificaciones
+    - **Historial de actividad** → Eventos asistidos, tickets comprados
+    - **Configuración de cuenta** → Privacidad, seguridad
+    - **Soporte multi-idioma** → ES/EN/PT/JA
+    - **Temas personalizados** → light/dark/purple/blue
+
+servers:
+  - url: http://localhost:8086
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Profile
+    description: Gestión de perfil de usuario
+  - name: Preferences
+    description: Configuraciones y preferencias
+  - name: Activity
+    description: Historial de actividad
+  - name: Health
+    description: Health check
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+
+  /profile:
+    get:
+      summary: Obtener perfil del usuario
+      tags: [Profile]
+      responses:
+        '200':
+          description: Perfil del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+
+    patch:
+      summary: Actualizar perfil
+      tags: [Profile]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+
+  /profile/avatar:
+    post:
+      summary: Subir avatar
+      tags: [Profile]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Avatar actualizado
+
+  /preferences:
+    get:
+      summary: Obtener preferencias
+      tags: [Preferences]
+      responses:
+        '200':
+          description: Preferencias del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferencesResponse'
+
+    patch:
+      summary: Actualizar preferencias
+      tags: [Preferences]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferencias actualizadas
+
+  /activity/history:
+    get:
+      summary: Historial de actividad
+      tags: [Activity]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Historial de actividad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityRecord'
+
+components:
+  schemas:
+    ProfileResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, email, name]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            email:
+              type: string
+              format: email
+            name:
+              type: string
+            avatar:
+              type: string
+              format: uri
+              nullable: true
+            bio:
+              type: string
+              nullable: true
+            city:
+              type: string
+              nullable: true
+            isPublic:
+              type: boolean
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        bio:
+          type: string
+          maxLength: 500
+        city:
+          type: string
+        isPublic:
+          type: boolean
+
+    PreferencesResponse:
+      type: object
+      properties:
+        language:
+          type: string
+          enum: [es, en, pt, ja]
+          default: es
+        theme:
+          type: string
+          enum: [light, dark, purple, blue]
+          default: light
+        notifications:
+          type: object
+          properties:
+            email:
+              type: boolean
+            push:
+              type: boolean
+            marketing:
+              type: boolean
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        language:
+          type: string
+          enum: [es, en, pt, ja]
+        theme:
+          type: string
+          enum: [light, dark, purple, blue]
+        notifications:
+          type: object
+          properties:
+            email:
+              type: boolean
+            push:
+              type: boolean
+            marketing:
+              type: boolean
+
+    ActivityRecord:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            type:
+              type: string
+              enum: [ticket_purchased, event_attended, profile_updated]
+            description:
+              type: string
+            metadata:
+              type: object
+              additionalProperties: true
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

@@ -1,0 +1,834 @@
+openapi: 3.0.3
+info:
+  title: Payment Service API
+  version: 1.0.0
+  description: |
+    Servicio de procesamiento de pagos: integración con Wompi, gestión de órdenes y métodos de pago.
+    
+    ## Funcionalidades principales
+    - **Integración Wompi** → Procesamiento con gateway colombiano
+    - **Múltiples métodos** → Tarjeta, PSE, Nequi, efectivo, billetera digital
+    - **Gestión de órdenes** → Crear, procesar y rastrear pagos
+    - **Webhooks Wompi** → Procesamiento asíncrono de notificaciones
+    - **Reembolsos** → Gestión completa de devoluciones
+    - **Auditoria completa** → Registro detallado de transacciones
+
+    ## Estados de pago
+    - `pending_payment` → Orden creada, esperando pago
+    - `processing` → Pago en proceso en Wompi
+    - `approved` → Pago exitoso y confirmado
+    - `rejected` → Pago rechazado por gateway o banco
+    - `failed` → Error técnico durante procesamiento
+    - `refunded` → Pago devuelto exitosamente
+
+    ## Métodos de pago soportados
+    - **CARD** → Tarjetas crédito/débito (Visa, MasterCard)
+    - **PSE** → Pagos electrónicos bancarios
+    - **NEQUI** → Billetera digital Nequi
+    - **BANCOLOMBIA_TRANSFER** → Transferencia Bancolombia
+    - **WALLET** → Billetera digital TuEvento
+    - **CASH** → Pago en efectivo (puntos físicos)
+
+servers:
+  - url: http://localhost:8084
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+  - url: https://api.{domain}/api/v1
+    description: Production
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Orders
+    description: Gestión de órdenes de compra
+  - name: Payments
+    description: Procesamiento de pagos
+  - name: Methods
+    description: Métodos de pago disponibles
+  - name: Refunds
+    description: Gestión de reembolsos
+  - name: Webhooks
+    description: Notificaciones de Wompi
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  database:
+                    type: string
+                    enum: [connected, disconnected]
+                  wompi:
+                    type: string
+                    enum: [available, unavailable]
+                  lastWompiCheck:
+                    $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+
+  /orders:
+    post:
+      summary: Crear orden de compra
+      description: |
+        Crea nueva orden con tickets reservados. Automáticamente calcula totales y 
+        libera reservas de asientos si no se completa el pago en 15 minutos.
+      operationId: createOrder
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            example:
+              reservedSeatIds:
+                - "550e8400-e29b-41d4-a716-446655440001"
+                - "550e8400-e29b-41d4-a716-446655440002"
+              customerInfo:
+                name: "María García"
+                email: "maria@example.com"
+                phone: "+57 300 123 4567"
+                documentType: "CC"
+                documentNumber: "12345678"
+      responses:
+        '201':
+          description: Orden creada exitosamente
+          headers:
+            Location:
+              description: URL de la orden creada
+              schema:
+                type: string
+                example: /orders/550e8400-e29b-41d4-a716-446655440000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          description: Error en datos de entrada
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              examples:
+                seats_not_reserved:
+                  value:
+                    error: SEATS_NOT_RESERVED
+                    message: Algunos asientos no están reservados por este usuario
+                invalid_customer_data:
+                  value:
+                    error: VALIDATION_ERROR
+                    message: Información de cliente inválida
+                    details:
+                      - field: email
+                        message: Formato de email inválido
+        '401':
+          $ref: '../contracts/openapi/_shared.yaml#/components/responses/Unauthorized'
+
+    get:
+      summary: Listar órdenes del usuario
+      description: Retorna órdenes del usuario autenticado con paginación y filtros.
+      tags: [Orders]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          description: Filtrar por estado de orden
+          schema:
+            type: string
+            enum: [pending_payment, processing, approved, rejected, failed, refunded]
+        - name: event_id
+          in: query
+          description: Filtrar por evento
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Lista de órdenes del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderSummary'
+                  meta:
+                    $ref: '../contracts/openapi/_shared.yaml#/components/schemas/PaginatedMeta'
+
+  /orders/{orderId}:
+    get:
+      summary: Obtener orden por ID
+      description: Retorna detalles completos de la orden. Solo accesible por el propietario o administrador.
+      tags: [Orders]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Detalles de la orden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '403':
+          description: Sin permisos para ver esta orden
+        '404':
+          $ref: '../contracts/openapi/_shared.yaml#/components/responses/NotFound'
+
+  /orders/{orderId}/cancel:
+    post:
+      summary: Cancelar orden
+      description: |
+        Cancela orden pendiente y libera asientos reservados. 
+        Solo disponible para órdenes en estado pending_payment.
+      tags: [Orders]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Orden cancelada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          description: Orden no puede ser cancelada
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: ORDER_CANNOT_BE_CANCELLED
+                message: Solo se pueden cancelar órdenes pendientes de pago
+
+  /payments/methods:
+    get:
+      summary: Obtener métodos de pago disponibles
+      description: Lista métodos de pago configurados con información de tarifas y disponibilidad.
+      tags: [Methods]
+      security: []
+      responses:
+        '200':
+          description: Métodos de pago disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentMethod'
+
+  /payments:
+    post:
+      summary: Procesar pago
+      description: |
+        Inicia procesamiento de pago para una orden. Genera enlace de pago Wompi
+        o procesa directamente según el método seleccionado.
+      operationId: processPayment
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessPaymentRequest'
+            examples:
+              card_payment:
+                summary: Pago con tarjeta
+                value:
+                  orderId: "550e8400-e29b-41d4-a716-446655440000"
+                  paymentMethod: "CARD"
+                  returnUrl: "https://tuevento.com/payment-result"
+              wallet_payment:
+                summary: Pago con billetera
+                value:
+                  orderId: "550e8400-e29b-41d4-a716-446655440000"
+                  paymentMethod: "WALLET"
+      responses:
+        '200':
+          description: Pago procesado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          description: Error en procesamiento
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              examples:
+                insufficient_wallet_balance:
+                  value:
+                    error: INSUFFICIENT_WALLET_BALANCE
+                    message: Saldo insuficiente en billetera digital
+                    details:
+                      required: 300000
+                      available: 150000
+                order_already_paid:
+                  value:
+                    error: ORDER_ALREADY_PAID
+                    message: Esta orden ya fue pagada exitosamente
+
+  /payments/{paymentId}:
+    get:
+      summary: Obtener estado del pago
+      description: Consulta estado actual del pago en Wompi y sistema local.
+      tags: [Payments]
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Estado del pago
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatusResponse'
+
+  /payments/{paymentId}/retry:
+    post:
+      summary: Reintentar pago fallido
+      description: Permite reintentar un pago que falló por error técnico (no por rechazo del banco).
+      tags: [Payments]
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paymentMethod:
+                  type: string
+                  enum: [CARD, PSE, NEQUI, BANCOLOMBIA_TRANSFER, WALLET]
+                  description: Cambiar método de pago (opcional)
+      responses:
+        '200':
+          description: Pago reintentado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+
+  /refunds:
+    post:
+      summary: Crear reembolso
+      description: |
+        Inicia proceso de reembolso para pago aprobado. 
+        Solo administradores u organizadores del evento.
+      tags: [Refunds]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '201':
+          description: Reembolso creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResponse'
+        '400':
+          description: Pago no es reembolsable
+        '403':
+          description: Sin permisos para reembolsar este pago
+
+    get:
+      summary: Listar reembolsos
+      description: Lista reembolsos con filtros. Solo administradores o propietarios.
+      tags: [Refunds]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, completed]
+        - name: payment_id
+          in: query
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Lista de reembolsos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RefundResponse'
+
+  /webhooks/wompi:
+    post:
+      summary: Webhook de Wompi
+      description: |
+        Endpoint para recibir notificaciones de cambio de estado desde Wompi.
+        Valida firma HMAC y actualiza estado de pagos automáticamente.
+      tags: [Webhooks]
+      security: []  # Autenticación via HMAC signature
+      parameters:
+        - name: X-Event
+          in: header
+          required: true
+          description: Tipo de evento Wompi
+          schema:
+            type: string
+            enum: [transaction.updated, transaction.approved, transaction.declined]
+        - name: X-Signature
+          in: header  
+          required: true
+          description: Firma HMAC-SHA256 del payload
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WompiWebhookPayload'
+      responses:
+        '200':
+          description: Webhook procesado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "processed"
+                  paymentId:
+                    $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        '400':
+          description: Payload inválido o firma incorrecta
+        '404':
+          description: Pago no encontrado en sistema
+
+components:
+  schemas:
+    # ─── Order Schemas ────────────────────────────────────────────────
+    CreateOrderRequest:
+      type: object
+      required: [reservedSeatIds, customerInfo]
+      properties:
+        reservedSeatIds:
+          type: array
+          items:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+          minItems: 1
+          maxItems: 10
+          description: IDs de asientos previamente reservados
+        customerInfo:
+          $ref: '#/components/schemas/CustomerInfo'
+
+    OrderSummary:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, status, totalAmount, ticketCount, eventName]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            status:
+              type: string
+              enum: [pending_payment, processing, approved, rejected, failed, refunded]
+            totalAmount:
+              type: number
+              description: Monto total en COP
+              example: 300000
+            ticketCount:
+              type: integer
+              example: 2
+            eventName:
+              type: string
+              example: "Concierto Coldplay 2024"
+            expiresAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              nullable: true
+              description: Fecha de expiración (solo para pending_payment)
+
+    OrderResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, userId, status, totalAmount, tickets, customer]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            status:
+              type: string
+              enum: [pending_payment, processing, approved, rejected, failed, refunded]
+            totalAmount:
+              type: number
+              example: 300000
+            currency:
+              type: string
+              enum: [COP]
+              example: COP
+            expiresAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              nullable: true
+            customer:
+              $ref: '#/components/schemas/CustomerInfo'
+            tickets:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderTicket'
+            payments:
+              type: array
+              items:
+                $ref: '#/components/schemas/PaymentSummary'
+              description: Historial de intentos de pago
+
+    # ─── Payment Schemas ──────────────────────────────────────────────
+    ProcessPaymentRequest:
+      type: object
+      required: [orderId, paymentMethod]
+      properties:
+        orderId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        paymentMethod:
+          type: string
+          enum: [CARD, PSE, NEQUI, BANCOLOMBIA_TRANSFER, WALLET, CASH]
+        returnUrl:
+          type: string
+          format: uri
+          description: URL de retorno después del pago (requerida para métodos externos)
+        paymentData:
+          type: object
+          description: Datos específicos del método de pago
+          properties:
+            bankCode:
+              type: string
+              description: Código de banco (para PSE)
+            userType:
+              type: string
+              enum: [NATURAL, JURIDICA]
+              description: Tipo de usuario (para PSE)
+            phoneNumber:
+              type: string
+              description: Número de teléfono (para Nequi)
+
+    PaymentResponse:
+      type: object
+      required: [paymentId, status]
+      properties:
+        paymentId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        status:
+          type: string
+          enum: [pending, processing, approved, rejected, failed]
+        paymentUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: URL de pago en Wompi (si aplica)
+        wompiTransactionId:
+          type: string
+          nullable: true
+          description: ID de transacción en Wompi
+        expiresAt:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+          description: Expiración del enlace de pago
+        message:
+          type: string
+          example: "Pago procesado exitosamente con billetera digital"
+
+    PaymentStatusResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, orderId, status, amount, paymentMethod]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            orderId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            status:
+              type: string
+              enum: [pending, processing, approved, rejected, failed]
+            amount:
+              type: number
+              example: 300000
+            paymentMethod:
+              type: string
+              enum: [CARD, PSE, NEQUI, BANCOLOMBIA_TRANSFER, WALLET, CASH]
+            wompiTransactionId:
+              type: string
+              nullable: true
+            wompiStatus:
+              type: string
+              nullable: true
+              description: Estado reportado por Wompi
+            failureReason:
+              type: string
+              nullable: true
+              description: Razón de fallo si aplica
+            processedAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              nullable: true
+
+    PaymentMethod:
+      type: object
+      required: [code, name, available, processingFee]
+      properties:
+        code:
+          type: string
+          enum: [CARD, PSE, NEQUI, BANCOLOMBIA_TRANSFER, WALLET, CASH]
+        name:
+          type: string
+          example: "Tarjeta de Crédito/Débito"
+        description:
+          type: string
+          example: "Pago seguro con Visa o MasterCard"
+        available:
+          type: boolean
+          example: true
+        processingFee:
+          type: object
+          properties:
+            percentage:
+              type: number
+              example: 2.59
+              description: Porcentaje de comisión
+            fixedAmount:
+              type: number
+              example: 900
+              description: Monto fijo adicional en COP
+        icon:
+          type: string
+          format: uri
+          example: "https://cdn.tuevento.com/payment-icons/card.svg"
+        estimatedTime:
+          type: string
+          example: "Inmediato"
+          description: Tiempo estimado de confirmación
+
+    PaymentSummary:
+      type: object
+      required: [id, status, amount, paymentMethod, createdAt]
+      properties:
+        id:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        status:
+          type: string
+          enum: [pending, processing, approved, rejected, failed]
+        amount:
+          type: number
+          example: 300000
+        paymentMethod:
+          type: string
+        createdAt:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        failureReason:
+          type: string
+          nullable: true
+
+    # ─── Refund Schemas ───────────────────────────────────────────────
+    CreateRefundRequest:
+      type: object
+      required: [paymentId, amount, reason]
+      properties:
+        paymentId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        amount:
+          type: number
+          minimum: 1
+          description: Monto a reembolsar (debe ser <= monto del pago)
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+          description: Razón del reembolso
+        refundMethod:
+          type: string
+          enum: [original_method, wallet, bank_transfer]
+          default: original_method
+          description: Método para procesar reembolso
+
+    RefundResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, paymentId, status, amount, reason]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            paymentId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            status:
+              type: string
+              enum: [pending, approved, rejected, completed]
+            amount:
+              type: number
+              example: 300000
+            reason:
+              type: string
+            refundMethod:
+              type: string
+              enum: [original_method, wallet, bank_transfer]
+            wompiRefundId:
+              type: string
+              nullable: true
+            processedAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              nullable: true
+            estimatedArrival:
+              type: string
+              nullable: true
+              example: "3-5 días hábiles"
+
+    # ─── Supporting Schemas ───────────────────────────────────────────
+    CustomerInfo:
+      type: object
+      required: [name, email, documentType, documentNumber]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "María García"
+        email:
+          type: string
+          format: email
+          example: "maria@example.com"
+        phone:
+          type: string
+          pattern: '^\+57 [0-9]{3} [0-9]{3} [0-9]{4}$'
+          example: "+57 300 123 4567"
+        documentType:
+          type: string
+          enum: [CC, CE, NIT, PASSPORT]
+          description: Tipo de documento
+        documentNumber:
+          type: string
+          minLength: 5
+          maxLength: 15
+          example: "12345678"
+
+    OrderTicket:
+      type: object
+      required: [seatId, eventName, sectionName, seatRow, seatNumber, price]
+      properties:
+        seatId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        eventName:
+          type: string
+          example: "Concierto Coldplay 2024"
+        sectionName:
+          type: string
+          example: "Platea"
+        seatRow:
+          type: string
+          example: "F15"
+        seatNumber:
+          type: string
+          example: "A23"
+        price:
+          type: number
+          example: 150000
+
+    # ─── Webhook Schemas ──────────────────────────────────────────────
+    WompiWebhookPayload:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          type: string
+          enum: [transaction.updated, transaction.approved, transaction.declined]
+        data:
+          type: object
+          properties:
+            transaction:
+              $ref: '#/components/schemas/WompiTransaction'
+
+    WompiTransaction:
+      type: object
+      required: [id, status, amount_in_cents, currency, reference, payment_method]
+      properties:
+        id:
+          type: string
+          description: ID de transacción en Wompi
+        status:
+          type: string
+          enum: [APPROVED, DECLINED, VOIDED, ERROR]
+        amount_in_cents:
+          type: integer
+          description: Monto en centavos
+        currency:
+          type: string
+          enum: [COP]
+        reference:
+          type: string
+          description: Referencia que envió TuEvento (orderID)
+        payment_method:
+          type: object
+          properties:
+            type:
+              type: string
+            extra:
+              type: object
+              additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        finalized_at:
+          type: string
+          format: date-time
+          nullable: true
+        status_message:
+          type: string
+          nullable: true
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

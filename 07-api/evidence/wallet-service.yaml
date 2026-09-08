@@ -1,0 +1,187 @@
+openapi: 3.0.3
+info:
+  title: Wallet Service API
+  version: 1.0.0
+  description: |
+    Servicio de billetera digital: gestión de saldo, transacciones y pagos.
+    
+    ## Funcionalidades principales
+    - **Saldo digital** → Recargas, pagos, transferencias
+    - **Transacciones** → Historial completo de movimientos
+    - **Integración pagos** → Usar saldo para comprar tickets
+    - **Reembolsos** → Recibir devoluciones en billetera
+    - **Tipos de transacción** → deposit/withdrawal/payment/refund
+
+servers:
+  - url: http://localhost:8087
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Wallet
+    description: Gestión de billetera
+  - name: Transactions
+    description: Transacciones y movimientos
+  - name: Health
+    description: Health check
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+
+  /wallet:
+    get:
+      summary: Obtener información de billetera
+      tags: [Wallet]
+      responses:
+        '200':
+          description: Información de billetera
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+
+  /wallet/deposit:
+    post:
+      summary: Recargar billetera
+      tags: [Wallet]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositRequest'
+      responses:
+        '201':
+          description: Recarga procesada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+
+  /wallet/pay:
+    post:
+      summary: Pagar con billetera
+      tags: [Wallet]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Pago procesado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+
+  /wallet/transactions:
+    get:
+      summary: Historial de transacciones
+      tags: [Transactions]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [deposit, withdrawal, payment, refund]
+      responses:
+        '200':
+          description: Historial de transacciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TransactionResponse'
+
+components:
+  schemas:
+    WalletResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, userId, balance, currency]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            balance:
+              type: number
+              example: 50000
+            currency:
+              type: string
+              enum: [COP]
+            isActive:
+              type: boolean
+
+    DepositRequest:
+      type: object
+      required: [amount, paymentMethod]
+      properties:
+        amount:
+          type: number
+          minimum: 10000
+          maximum: 2000000
+        paymentMethod:
+          type: string
+          enum: [CARD, PSE, NEQUI]
+
+    PaymentRequest:
+      type: object
+      required: [orderId, amount]
+      properties:
+        orderId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        amount:
+          type: number
+          minimum: 1
+
+    TransactionResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, walletId, type, amount, status]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            walletId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            type:
+              type: string
+              enum: [deposit, withdrawal, payment, refund]
+            amount:
+              type: number
+            status:
+              type: string
+              enum: [pending, completed, failed]
+            reference:
+              type: string
+              nullable: true
+            description:
+              type: string
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

@@ -1,0 +1,874 @@
+openapi: 3.0.3
+info:
+  title: Event Service API
+  version: 1.0.0
+  description: |
+    Servicio de gestión de eventos: creación, actualización, categorización y gestión de multimedia.
+    
+    ## Funcionalidades principales
+    - **CRUD de eventos** → Crear, listar, actualizar y eliminar eventos
+    - **Gestión de estados** → DRAFT, PUBLISHED, CANCELLED, FINISHED
+    - **Categorización** → Asignación de eventos a categorías jerárquicas
+    - **Multimedia** → Subida de imágenes, galería y documentos
+    - **Layouts de venue** → Configuración gráfica del layout del evento (JSONB)
+    - **Valoraciones** → Sistema de rating y comentarios de usuarios
+
+    ## Estados de evento
+    - `DRAFT` → Evento en borrador, no visible públicamente
+    - `PUBLISHED` → Evento publicado, disponible para compra
+    - `CANCELLED` → Evento cancelado, no se pueden comprar tickets
+    - `FINISHED` → Evento finalizado, modo histórico
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+  - url: https://api.{domain}/api/v1
+    description: Production
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Events
+    description: Gestión de eventos
+  - name: Categories
+    description: Categorización de eventos
+  - name: Media
+    description: Gestión de multimedia
+  - name: Ratings
+    description: Valoraciones y comentarios
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  database:
+                    type: string
+                    enum: [connected, disconnected]
+                  dependencies:
+                    type: object
+                    properties:
+                      geolocation-service:
+                        type: string
+                        enum: [ok, degraded, down]
+
+  /events:
+    get:
+      summary: Listar eventos
+      description: Retorna eventos paginados con filtros opcionales. Los eventos DRAFT solo son visibles para sus creadores.
+      operationId: listEvents
+      tags: [Events]
+      security: []  # Endpoint público para eventos PUBLISHED
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          description: Filtrar por estado del evento
+          schema:
+            type: string
+            enum: [DRAFT, PUBLISHED, CANCELLED, FINISHED]
+        - name: category
+          in: query
+          description: Filtrar por categoría (ID o nombre)
+          schema:
+            type: string
+        - name: city
+          in: query
+          description: Filtrar por ciudad
+          schema:
+            type: string
+        - name: start_date
+          in: query
+          description: Eventos que inician desde esta fecha
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          description: Eventos que terminan antes de esta fecha
+          schema:
+            type: string
+            format: date
+        - name: price_min
+          in: query
+          description: Precio mínimo de tickets
+          schema:
+            type: number
+            minimum: 0
+        - name: price_max
+          in: query
+          description: Precio máximo de tickets
+          schema:
+            type: number
+            minimum: 0
+        - name: q
+          in: query
+          description: Búsqueda por texto (nombre, descripción)
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Lista de eventos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventSummary'
+                  meta:
+                    $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+
+    post:
+      summary: Crear evento
+      description: Crea un nuevo evento en estado DRAFT. Requiere rol ORGANIZER o ADMIN.
+      operationId: createEvent
+      tags: [Events]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+            example:
+              name: "Concierto Coldplay 2024"
+              description: "La banda británica regresa a Bogotá con su nuevo tour mundial"
+              categoryId: "550e8400-e29b-41d4-a716-446655440000"
+              siteId: "550e8400-e29b-41d4-a716-446655440001"
+              startDate: "2024-06-15T20:00:00Z"
+              endDate: "2024-06-15T23:30:00Z"
+              capacity: 50000
+              minPrice: 150000
+              maxPrice: 800000
+      responses:
+        '201':
+          description: Evento creado exitosamente
+          headers:
+            Location:
+              description: URL del evento creado
+              schema:
+                type: string
+                example: /events/550e8400-e29b-41d4-a716-446655440000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Usuario no tiene rol de organizador
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INSUFFICIENT_PERMISSIONS
+                message: Solo los organizadores pueden crear eventos
+
+  /events/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+
+    get:
+      summary: Obtener evento por ID
+      description: Retorna detalles completos de un evento. Los eventos DRAFT solo son accesibles por sus creadores.
+      operationId: getEventById
+      tags: [Events]
+      security: []  # Público para eventos PUBLISHED
+      responses:
+        '200':
+          description: Detalles del evento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '403':
+          description: Evento DRAFT no accesible
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+
+    patch:
+      summary: Actualizar evento
+      description: Actualización parcial de evento. Solo el creador o administrador pueden editar.
+      operationId: updateEvent
+      tags: [Events]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventRequest'
+      responses:
+        '200':
+          description: Evento actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Sin permisos para editar este evento
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+
+    delete:
+      summary: Eliminar evento
+      description: Soft delete del evento (marca como eliminado). Solo el creador o administrador.
+      operationId: deleteEvent
+      tags: [Events]
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Evento eliminado exitosamente
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Sin permisos para eliminar este evento
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+
+  /events/{id}/publish:
+    post:
+      summary: Publicar evento
+      description: Cambia el estado de DRAFT a PUBLISHED. Valida que el evento tenga toda la información requerida.
+      operationId: publishEvent
+      tags: [Events]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Evento publicado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          description: Evento no cumple requisitos para publicación
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: VALIDATION_ERROR
+                message: El evento debe tener al menos una sección configurada
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Sin permisos para publicar este evento
+
+  /events/{id}/media:
+    get:
+      summary: Listar multimedia del evento
+      tags: [Media]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+        - name: type
+          in: query
+          description: Filtrar por tipo de media
+          schema:
+            type: string
+            enum: [cover_image, gallery_image, document]
+      security: []
+      responses:
+        '200':
+          description: Lista de archivos multimedia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MediaFile'
+
+    post:
+      summary: Subir archivo multimedia
+      description: Sube una imagen de portada, galería o documento del evento.
+      tags: [Media]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, type]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Archivo a subir (max 10MB)
+                type:
+                  type: string
+                  enum: [cover_image, gallery_image, document]
+                description:
+                  type: string
+                  maxLength: 255
+                  description: Descripción opcional del archivo
+      responses:
+        '201':
+          description: Archivo subido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFile'
+        '400':
+          description: Archivo inválido o muy grande
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+
+  /events/{id}/layout:
+    get:
+      summary: Obtener layout del venue
+      description: Retorna la configuración JSON del layout gráfico del evento.
+      tags: [Events]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+      security: []
+      responses:
+        '200':
+          description: Layout del venue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueLayout'
+
+    put:
+      summary: Configurar layout del venue
+      description: Establece o actualiza la configuración JSON del layout. Solo el organizador del evento.
+      tags: [Events]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VenueLayoutRequest'
+      responses:
+        '200':
+          description: Layout actualizado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueLayout'
+        '400':
+          description: Layout JSON inválido
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+
+  /events/{id}/ratings:
+    get:
+      summary: Obtener valoraciones del evento
+      tags: [Ratings]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+      security: []
+      responses:
+        '200':
+          description: Lista de valoraciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventRating'
+                  meta:
+                    allOf:
+                      - $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+                      - type: object
+                        properties:
+                          averageRating:
+                            type: number
+                            format: float
+                            minimum: 1
+                            maximum: 5
+                            example: 4.2
+
+    post:
+      summary: Valorar evento
+      description: Añade una valoración y comentario al evento. Solo usuarios que compraron tickets.
+      tags: [Ratings]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdParam'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRatingRequest'
+      responses:
+        '201':
+          description: Valoración creada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventRating'
+        '400':
+          description: Valoración inválida
+        '403':
+          description: Usuario no asistió al evento o ya valoró
+
+  /categories:
+    get:
+      summary: Listar categorías de eventos
+      description: Retorna categorías en estructura jerárquica.
+      operationId: listCategories
+      tags: [Categories]
+      security: []
+      parameters:
+        - name: parent_id
+          in: query
+          description: Filtrar por categoría padre (solo subcategorías)
+          schema:
+            $ref: './_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Lista de categorías
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventCategory'
+
+    post:
+      summary: Crear categoría
+      description: Crea nueva categoría de evento. Solo administradores.
+      tags: [Categories]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCategoryRequest'
+      responses:
+        '201':
+          description: Categoría creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventCategory'
+        '403':
+          description: Solo administradores pueden crear categorías
+
+components:
+  schemas:
+    # ─── Event Schemas ────────────────────────────────────────────────
+    CreateEventRequest:
+      type: object
+      required: [name, description, categoryId, siteId, startDate, endDate, capacity]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 200
+          description: Nombre del evento
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+          description: Descripción detallada del evento
+        categoryId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+          description: ID de la categoría del evento
+        siteId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+          description: ID del sitio/venue donde se realiza
+        startDate:
+          type: string
+          format: date-time
+          description: Fecha y hora de inicio
+        endDate:
+          type: string
+          format: date-time
+          description: Fecha y hora de finalización
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 200000
+          description: Capacidad total del evento
+        minPrice:
+          type: number
+          minimum: 0
+          description: Precio mínimo de entrada (COP)
+        maxPrice:
+          type: number
+          minimum: 0
+          description: Precio máximo de entrada (COP)
+
+    UpdateEventRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 200
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        categoryId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 200000
+
+    EventSummary:
+      description: Versión resumida del evento para listados
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, name, status, startDate, site, category, minPrice]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Concierto Coldplay 2024"
+            status:
+              type: string
+              enum: [DRAFT, PUBLISHED, CANCELLED, FINISHED]
+              example: PUBLISHED
+            startDate:
+              $ref: './_shared.yaml#/components/schemas/Timestamp'
+            endDate:
+              $ref: './_shared.yaml#/components/schemas/Timestamp'
+            site:
+              $ref: '#/components/schemas/VenueSummary'
+            category:
+              $ref: '#/components/schemas/CategorySummary'
+            coverImage:
+              type: string
+              format: uri
+              nullable: true
+              example: "https://cdn.tuevento.com/events/123/cover.jpg"
+            minPrice:
+              type: number
+              example: 150000
+            maxPrice:
+              type: number
+              example: 800000
+            availableTickets:
+              type: integer
+              example: 1250
+
+    EventResponse:
+      description: Representación completa del evento
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, name, description, status, startDate, endDate, site, category, capacity]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Concierto Coldplay 2024"
+            description:
+              type: string
+              example: "La banda británica regresa a Bogotá"
+            status:
+              type: string
+              enum: [DRAFT, PUBLISHED, CANCELLED, FINISHED]
+            startDate:
+              $ref: './_shared.yaml#/components/schemas/Timestamp'
+            endDate:
+              $ref: './_shared.yaml#/components/schemas/Timestamp'
+            site:
+              $ref: '#/components/schemas/VenueSummary'
+            category:
+              $ref: '#/components/schemas/CategorySummary'
+            capacity:
+              type: integer
+              example: 50000
+            minPrice:
+              type: number
+              example: 150000
+            maxPrice:
+              type: number
+              example: 800000
+            coverImage:
+              type: string
+              format: uri
+              nullable: true
+            galleryImages:
+              type: array
+              items:
+                type: string
+                format: uri
+            averageRating:
+              type: number
+              format: float
+              minimum: 1
+              maximum: 5
+              nullable: true
+              example: 4.2
+            totalRatings:
+              type: integer
+              example: 156
+
+    # ─── Category Schemas ─────────────────────────────────────────────
+    CreateCategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        parentId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+          nullable: true
+          description: ID de categoría padre (null para categorías raíz)
+
+    EventCategory:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, name]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            name:
+              type: string
+              example: "Conciertos"
+            description:
+              type: string
+              example: "Eventos musicales en vivo"
+            parentId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+              nullable: true
+            subcategories:
+              type: array
+              items:
+                $ref: '#/components/schemas/CategorySummary'
+
+    CategorySummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          example: "Rock"
+
+    # ─── Venue/Site Schemas ──────────────────────────────────────────
+    VenueSummary:
+      type: object
+      required: [id, name, city]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          example: "Estadio El Campín"
+        city:
+          type: string
+          example: "Bogotá"
+        address:
+          type: string
+          example: "Av. NQS #57-60"
+
+    # ─── Layout Schemas ───────────────────────────────────────────────
+    VenueLayoutRequest:
+      type: object
+      required: [layout]
+      properties:
+        layout:
+          type: object
+          description: Configuración JSON del layout del venue
+          additionalProperties: true
+          example:
+            sections:
+              - id: "platea"
+                name: "Platea"
+                coordinates: { x: 100, y: 200, width: 300, height: 200 }
+                capacity: 500
+              - id: "palco"
+                name: "Palco VIP" 
+                coordinates: { x: 50, y: 50, width: 400, height: 100 }
+                capacity: 100
+
+    VenueLayout:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [eventId, layout]
+          properties:
+            eventId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            layout:
+              type: object
+              additionalProperties: true
+
+    # ─── Media Schemas ────────────────────────────────────────────────
+    MediaFile:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, eventId, type, url, size, mimeType]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            eventId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            type:
+              type: string
+              enum: [cover_image, gallery_image, document]
+            url:
+              type: string
+              format: uri
+              example: "https://cdn.tuevento.com/events/123/image.jpg"
+            size:
+              type: integer
+              description: Tamaño en bytes
+              example: 1024000
+            mimeType:
+              type: string
+              example: "image/jpeg"
+            description:
+              type: string
+              nullable: true
+
+    # ─── Rating Schemas ───────────────────────────────────────────────
+    CreateRatingRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Calificación del evento (1-5 estrellas)
+        comment:
+          type: string
+          maxLength: 1000
+          description: Comentario opcional
+
+    EventRating:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, eventId, userId, userName, rating]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            eventId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            userName:
+              type: string
+              example: "María García"
+            rating:
+              type: integer
+              minimum: 1
+              maximum: 5
+              example: 4
+            comment:
+              type: string
+              nullable: true
+              example: "Excelente evento, muy bien organizado"
+            replies:
+              type: array
+              items:
+                $ref: '#/components/schemas/RatingReply'
+
+    RatingReply:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, userId, userName, comment]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            userName:
+              type: string
+            comment:
+              type: string
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'

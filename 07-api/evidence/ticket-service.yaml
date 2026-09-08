@@ -1,0 +1,776 @@
+openapi: 3.0.3
+info:
+  title: Ticket Service API
+  version: 1.0.0
+  description: |
+    Servicio de gestión de tickets: generación, códigos QR, check-in y validación.
+    
+    ## Funcionalidades principales
+    - **Generación automática** → Crear tickets después de pago exitoso
+    - **Códigos únicos** → Cada ticket tiene código alfanumérico único
+    - **QR codes** → Generación de códigos QR para check-in rápido
+    - **Check-in/Check-out** → Validación de entrada y salida del evento
+    - **Estados de ticket** → Seguimiento del ciclo de vida completo
+    - **Transferencias** → Permitir transferir tickets entre usuarios
+    - **Anti-fraude** → Validación que cada ticket solo se use una vez
+
+    ## Estados de ticket
+    - `valid` → Ticket válido, no usado
+    - `used` → Ticket ya utilizado para ingresar al evento
+    - `cancelled` → Ticket cancelado por reembolso
+    - `expired` → Ticket expirado (después de fecha del evento)
+    - `transferred` → Ticket transferido a otro usuario
+
+    ## Flujo de check-in
+    1. Usuario presenta QR code en entrada del evento
+    2. Scanner lee código QR y obtiene ticket ID
+    3. Sistema valida que ticket esté en estado `valid`
+    4. Si válido, cambia estado a `used` y registra check-in
+    5. Si inválido, muestra razón del rechazo
+
+servers:
+  - url: http://localhost:8085
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+  - url: https://api.{domain}/api/v1
+    description: Production
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Tickets
+    description: Gestión de tickets
+  - name: CheckIn
+    description: Validación y check-in
+  - name: Transfer
+    description: Transferencia de tickets
+  - name: Generation
+    description: Generación de tickets (interno)
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  database:
+                    type: string
+                    enum: [connected, disconnected]
+                  qrGenerator:
+                    type: string
+                    enum: [available, unavailable]
+
+  /tickets:
+    get:
+      summary: Listar tickets del usuario
+      description: Retorna todos los tickets del usuario autenticado con filtros opcionales.
+      tags: [Tickets]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          description: Filtrar por estado de ticket
+          schema:
+            type: string
+            enum: [valid, used, cancelled, expired, transferred]
+        - name: event_id
+          in: query
+          description: Filtrar por evento
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: upcoming_only
+          in: query
+          description: Solo eventos próximos (no finalizados)
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Lista de tickets del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TicketSummary'
+                  meta:
+                    allOf:
+                      - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/PaginatedMeta'
+                      - type: object
+                        properties:
+                          totalTickets:
+                            type: integer
+                            example: 15
+                          upcomingEvents:
+                            type: integer
+                            example: 3
+
+  /tickets/{ticketId}:
+    get:
+      summary: Obtener ticket por ID
+      description: Retorna detalles completos del ticket. Solo accesible por propietario o administrador.
+      tags: [Tickets]
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Detalles del ticket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '403':
+          description: Sin permisos para ver este ticket
+        '404':
+          $ref: '../contracts/openapi/_shared.yaml#/components/responses/NotFound'
+
+  /tickets/{ticketId}/qr:
+    get:
+      summary: Generar código QR del ticket
+      description: |
+        Genera imagen PNG del código QR para check-in. 
+        El QR contiene el ID del ticket encriptado para seguridad.
+      tags: [Tickets]
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: size
+          in: query
+          description: Tamaño del QR en píxeles
+          schema:
+            type: integer
+            minimum: 100
+            maximum: 500
+            default: 200
+        - name: format
+          in: query
+          description: Formato de la imagen
+          schema:
+            type: string
+            enum: [png, svg]
+            default: png
+      responses:
+        '200':
+          description: Imagen del código QR
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+        '403':
+          description: Sin permisos para generar QR de este ticket
+        '410':
+          description: Ticket no válido para generar QR
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: TICKET_NOT_VALID_FOR_QR
+                message: Solo tickets válidos pueden generar código QR
+
+  /tickets/{ticketId}/pdf:
+    get:
+      summary: Generar PDF del ticket
+      description: Genera ticket en formato PDF con QR code, información del evento y asiento.
+      tags: [Tickets]
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: language
+          in: query
+          description: Idioma del PDF
+          schema:
+            type: string
+            enum: [es, en, pt, ja]
+            default: es
+      responses:
+        '200':
+          description: PDF del ticket
+          headers:
+            Content-Disposition:
+              description: Nombre del archivo sugerido
+              schema:
+                type: string
+                example: 'attachment; filename="ticket-coldplay-2024.pdf"'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Sin permisos para descargar este ticket
+
+  /tickets/generate:
+    post:
+      summary: Generar tickets para orden pagada
+      description: |
+        **Endpoint interno** - Solo para uso del sistema después de pago exitoso.
+        Genera tickets automáticamente cuando una orden es aprobada.
+      tags: [Generation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateTicketsRequest'
+      responses:
+        '201':
+          description: Tickets generados exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedTickets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TicketResponse'
+                  totalGenerated:
+                    type: integer
+                    example: 2
+        '400':
+          description: Orden no es válida para generar tickets
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              examples:
+                order_not_paid:
+                  value:
+                    error: ORDER_NOT_PAID
+                    message: Solo se pueden generar tickets para órdenes pagadas
+                tickets_already_exist:
+                  value:
+                    error: TICKETS_ALREADY_GENERATED
+                    message: Ya existen tickets para esta orden
+
+  /checkin/validate:
+    post:
+      summary: Validar ticket para check-in
+      description: |
+        Valida código QR escaneado y registra check-in si es válido.
+        Incluye validación de fecha/hora del evento y estado del ticket.
+      tags: [CheckIn]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInRequest'
+            example:
+              qrCode: "eyJpZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMCIsInMiOiJhYmMxMjMifQ"
+              scanLocation: "Entrada Principal"
+              scannerUserId: "550e8400-e29b-41d4-a716-446655440001"
+      responses:
+        '200':
+          description: Check-in exitoso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+        '400':
+          description: Código QR inválido o ticket no válido
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              examples:
+                invalid_qr:
+                  value:
+                    error: INVALID_QR_CODE
+                    message: Código QR no válido o corrupto
+                ticket_already_used:
+                  value:
+                    error: TICKET_ALREADY_USED
+                    message: Este ticket ya fue utilizado para ingresar
+                    details:
+                      usedAt: "2024-01-15T18:30:00Z"
+                      usedLocation: "Entrada Principal"
+                event_not_started:
+                  value:
+                    error: EVENT_NOT_STARTED
+                    message: El evento aún no ha comenzado. Check-in disponible 2 horas antes.
+
+  /checkin/history:
+    get:
+      summary: Historial de check-ins
+      description: Lista todos los check-ins realizados. Solo administradores y organizadores.
+      tags: [CheckIn]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+        - name: event_id
+          in: query
+          required: true
+          description: Filtrar por evento (requerido)
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        - name: date_from
+          in: query
+          description: Check-ins desde fecha
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          description: Check-ins hasta fecha
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Historial de check-ins
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CheckInRecord'
+                  meta:
+                    allOf:
+                      - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/PaginatedMeta'
+                      - type: object
+                        properties:
+                          totalCheckIns:
+                            type: integer
+                            example: 1250
+                          uniqueAttendees:
+                            type: integer
+                            example: 1245
+
+  /tickets/{ticketId}/transfer:
+    post:
+      summary: Transferir ticket a otro usuario
+      description: |
+        Transfiere propiedad del ticket a otro usuario por email.
+        Solo tickets válidos pueden ser transferidos.
+      tags: [Transfer]
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferTicketRequest'
+      responses:
+        '200':
+          description: Ticket transferido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketTransferResponse'
+        '400':
+          description: Ticket no puede ser transferido
+          content:
+            application/json:
+              schema:
+                $ref: '../contracts/openapi/_shared.yaml#/components/schemas/ErrorResponse'
+              examples:
+                ticket_not_transferable:
+                  value:
+                    error: TICKET_NOT_TRANSFERABLE
+                    message: Solo tickets válidos pueden ser transferidos
+                transfer_to_self:
+                  value:
+                    error: CANNOT_TRANSFER_TO_SELF
+                    message: No puedes transferir un ticket a ti mismo
+
+  /tickets/transfers/pending:
+    get:
+      summary: Obtener transferencias pendientes
+      description: Lista transferencias de tickets pendientes de aceptación por el usuario.
+      tags: [Transfer]
+      responses:
+        '200':
+          description: Transferencias pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingTransfer'
+
+  /tickets/transfers/{transferId}/accept:
+    post:
+      summary: Aceptar transferencia de ticket
+      description: Acepta una transferencia pendiente y transfiere la propiedad del ticket.
+      tags: [Transfer]
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '200':
+          description: Transferencia aceptada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '400':
+          description: Transferencia no puede ser aceptada
+        '404':
+          description: Transferencia no encontrada o no dirigida a este usuario
+
+  /tickets/transfers/{transferId}/reject:
+    post:
+      summary: Rechazar transferencia de ticket
+      description: Rechaza una transferencia pendiente y notifica al emisor.
+      tags: [Transfer]
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '204':
+          description: Transferencia rechazada exitosamente
+
+components:
+  schemas:
+    # ─── Ticket Schemas ───────────────────────────────────────────────
+    TicketSummary:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, ticketCode, status, eventName, eventDate, seatInfo]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            ticketCode:
+              type: string
+              description: Código único alfanumérico del ticket
+              example: "TKT-CLY24-A7X9P2"
+            status:
+              type: string
+              enum: [valid, used, cancelled, expired, transferred]
+            eventName:
+              type: string
+              example: "Concierto Coldplay 2024"
+            eventDate:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+            seatInfo:
+              $ref: '#/components/schemas/TicketSeatInfo'
+            qrAvailable:
+              type: boolean
+              description: Si se puede generar QR para este ticket
+              example: true
+
+    TicketResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, ticketCode, orderId, userId, status, event, seat]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            ticketCode:
+              type: string
+              example: "TKT-CLY24-A7X9P2"
+            orderId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+              description: ID de la orden de compra original
+            userId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+              description: Propietario actual del ticket
+            originalUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+              nullable: true
+              description: Comprador original (si fue transferido)
+            status:
+              type: string
+              enum: [valid, used, cancelled, expired, transferred]
+            event:
+              $ref: '#/components/schemas/TicketEventInfo'
+            seat:
+              $ref: '#/components/schemas/TicketSeatInfo'
+            checkIn:
+              $ref: '#/components/schemas/CheckInInfo'
+              nullable: true
+              description: Información de check-in (si ya se usó)
+            transferHistory:
+              type: array
+              items:
+                $ref: '#/components/schemas/TransferRecord'
+              description: Historial de transferencias
+
+    # ─── Generation Schemas ───────────────────────────────────────────
+    GenerateTicketsRequest:
+      type: object
+      required: [orderId]
+      properties:
+        orderId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+          description: ID de la orden pagada
+        customTicketPrefix:
+          type: string
+          maxLength: 10
+          description: Prefijo personalizado para códigos de ticket
+          example: "CLY24"
+
+    # ─── Check-in Schemas ─────────────────────────────────────────────
+    CheckInRequest:
+      type: object
+      required: [qrCode, scanLocation]
+      properties:
+        qrCode:
+          type: string
+          description: Contenido del QR code escaneado (base64 encoded)
+        scanLocation:
+          type: string
+          maxLength: 100
+          description: Ubicación donde se escaneó
+          example: "Entrada Principal"
+        scannerUserId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+          nullable: true
+          description: ID del usuario que escanea (staff)
+
+    CheckInResponse:
+      type: object
+      required: [success, ticket, checkInId, timestamp]
+      properties:
+        success:
+          type: boolean
+          example: true
+        ticket:
+          $ref: '#/components/schemas/TicketSummary'
+        checkInId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+          description: ID único del registro de check-in
+        timestamp:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        attendeeName:
+          type: string
+          example: "María García"
+        welcomeMessage:
+          type: string
+          example: "¡Bienvenida María! Disfruta el concierto de Coldplay"
+
+    CheckInRecord:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, ticketId, userId, scanLocation, scannerUserId]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            ticketId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            userId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            attendeeName:
+              type: string
+              example: "María García"
+            scanLocation:
+              type: string
+              example: "Entrada Principal"
+            scannerUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            scannerName:
+              type: string
+              example: "Staff - Juan Pérez"
+
+    CheckInInfo:
+      type: object
+      required: [checkInId, timestamp, scanLocation]
+      properties:
+        checkInId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        timestamp:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        scanLocation:
+          type: string
+          example: "Entrada Principal"
+        scannerName:
+          type: string
+          example: "Staff - Juan Pérez"
+
+    # ─── Transfer Schemas ─────────────────────────────────────────────
+    TransferTicketRequest:
+      type: object
+      required: [recipientEmail]
+      properties:
+        recipientEmail:
+          type: string
+          format: email
+          description: Email del usuario que recibirá el ticket
+        message:
+          type: string
+          maxLength: 500
+          description: Mensaje opcional para el destinatario
+        expiresAt:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+          description: Fecha límite para aceptar (opcional, default 7 días)
+
+    TicketTransferResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, ticketId, fromUserId, toEmail, status]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            ticketId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            fromUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            toEmail:
+              type: string
+              format: email
+            toUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+              nullable: true
+              description: ID del usuario destinatario (cuando se registre)
+            status:
+              type: string
+              enum: [pending, accepted, rejected, expired]
+            message:
+              type: string
+              nullable: true
+            expiresAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+
+    PendingTransfer:
+      type: object
+      required: [transferId, ticket, fromUserName, message, expiresAt]
+      properties:
+        transferId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        ticket:
+          $ref: '#/components/schemas/TicketSummary'
+        fromUserName:
+          type: string
+          example: "Carlos Mendoza"
+        message:
+          type: string
+          nullable: true
+          example: "Te regalo mi ticket porque no puedo asistir"
+        expiresAt:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        daysRemaining:
+          type: integer
+          example: 3
+
+    TransferRecord:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [fromUserId, toUserId, transferDate]
+          properties:
+            fromUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            fromUserName:
+              type: string
+            toUserId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            toUserName:
+              type: string
+            transferDate:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+
+    # ─── Supporting Schemas ───────────────────────────────────────────
+    TicketEventInfo:
+      type: object
+      required: [id, name, startDate, venue]
+      properties:
+        id:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          example: "Concierto Coldplay 2024"
+        startDate:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        endDate:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+        venue:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "Estadio El Campín"
+            address:
+              type: string
+              example: "Av. NQS #57-60, Bogotá"
+
+    TicketSeatInfo:
+      type: object
+      required: [sectionName, row, number, price]
+      properties:
+        seatId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        sectionName:
+          type: string
+          example: "Platea"
+        row:
+          type: string
+          example: "F15"
+        number:
+          type: string
+          example: "A23"
+        seatType:
+          type: string
+          enum: [standard, vip, accessible]
+        price:
+          type: number
+          description: Precio pagado por este asiento
+          example: 150000
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'

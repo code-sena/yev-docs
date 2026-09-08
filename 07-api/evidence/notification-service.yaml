@@ -1,0 +1,178 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: |
+    Servicio de notificaciones: emails, push notifications y gestión de plantillas.
+    
+    ## Funcionalidades principales
+    - **Email notifications** → Confirmaciones, tickets, recordatorios
+    - **Push notifications** → Notificaciones móviles
+    - **Plantillas** → Templates predefinidas por tipo
+    - **Tracking** → Estado de entrega y métricas
+    - **Canales múltiples** → Email, push, SMS (futuro)
+
+servers:
+  - url: http://localhost:8088
+    description: Local development
+  - url: https://api.dev.{domain}/api/v1
+    description: Development
+    variables:
+      domain:
+        default: tuevento.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Notifications
+    description: Envío de notificaciones
+  - name: Templates
+    description: Gestión de plantillas
+  - name: Health
+    description: Health check
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+
+  /notifications:
+    post:
+      summary: Enviar notificación
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+      responses:
+        '201':
+          description: Notificación enviada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+
+    get:
+      summary: Listar notificaciones del usuario
+      tags: [Notifications]
+      parameters:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/PageParam'
+        - $ref: '../contracts/openapi/_shared.yaml#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Lista de notificaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationResponse'
+
+  /notifications/{id}/mark-read:
+    post:
+      summary: Marcar como leída
+      tags: [Notifications]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+      responses:
+        '204':
+          description: Notificación marcada como leída
+
+  /templates:
+    get:
+      summary: Listar plantillas
+      tags: [Templates]
+      responses:
+        '200':
+          description: Lista de plantillas disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TemplateResponse'
+
+components:
+  schemas:
+    SendNotificationRequest:
+      type: object
+      required: [recipientId, type, templateId]
+      properties:
+        recipientId:
+          $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+        type:
+          type: string
+          enum: [email, push, sms]
+        templateId:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    NotificationResponse:
+      allOf:
+        - $ref: '../contracts/openapi/_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, recipientId, type, status, subject]
+          properties:
+            id:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            recipientId:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/UUID'
+            type:
+              type: string
+              enum: [email, push, sms]
+            status:
+              type: string
+              enum: [pending, sent, delivered, failed, read]
+            subject:
+              type: string
+            content:
+              type: string
+            sentAt:
+              $ref: '../contracts/openapi/_shared.yaml#/components/schemas/Timestamp'
+              nullable: true
+            isRead:
+              type: boolean
+
+    TemplateResponse:
+      type: object
+      required: [id, name, type, subject]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [email, push, sms]
+        subject:
+          type: string
+        template:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+
+  securitySchemes:
+    bearerAuth:
+      $ref: '../contracts/openapi/_shared.yaml#/components/securitySchemes/bearerAuth'
