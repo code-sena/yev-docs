@@ -1,161 +1,212 @@
-# Non-Functional Requirements (NFR)
+# Non-Functional Requirements (NFR) — TuEvento
 
-> NFRs define the **qualities of the system** — not what it does but how well it does it.
-> The golden rule: every NFR must have a metric. "The system must be fast" is not an NFR.
-> "The P99 latency of the /orders endpoint must be < 200ms under 500 RPS load" is.
-
----
-
-## How to write a measurable NFR?
-
-| Bad | Good |
-|-----|------|
-| "The system must be fast" | "P95 latency must be < 300ms under 1000 concurrent RPS" |
-| "The system must be secure" | "All endpoints require a valid JWT; tokens expire in 1 hour" |
-| "The system must scale" | "The system must support up to 5000 concurrent users without degradation" |
-| "The system must be available" | "Availability SLO: 99.9% monthly (maximum 44 min downtime/month)" |
+> **Requisitos no funcionales de TuEvento** — Especificación de calidad, rendimiento y restricciones técnicas.
+> Basado en la arquitectura del sistema, stack tecnológico y necesidades del proyecto.
 
 ---
 
-## NFR-001: Performance
+## Performance Requirements
 
-| Attribute | Metric | Test condition |
-|-----------|--------|---------------|
-| P95 latency — critical endpoints | < 300ms | Under [N] RPS load |
-| P99 latency — critical endpoints | < 500ms | Under [N] RPS load |
-| P95 latency — non-critical endpoints | < 1000ms | Normal load |
-| Minimum throughput | [N] RPS | Without degradation |
-| Service startup time | < 30 seconds | Cold start |
-
-**Defined critical endpoints:**
-- `POST /[resource]` — [justification for why it is critical]
-- `GET /[resource]/:id` — [justification]
-
-**Load testing tools:**
-- k6, Apache JMeter, Locust, Gatling
-
-**Where is it validated?** CI/CD in the staging pipeline before production.
+| ID | Requirement | Metric | How to verify |
+|----|------------|--------|--------------|
+| NFR-001 | API Response time | p95 < 200ms for CRUD operations | Load test with K6 |
+| NFR-002 | WebSocket seat updates | < 100ms latency for real-time updates | WebSocket performance test |
+| NFR-003 | Database query performance | < 50ms for simple queries, < 500ms for complex aggregations | Database performance monitoring |
+| NFR-004 | Payment processing time | < 5 seconds from request to response | Wompi integration tests |
+| NFR-005 | QR code generation | < 1 second per ticket | Performance benchmark |
+| NFR-006 | File upload speed | Support files up to 10MB with < 30s upload time | File upload stress test |
 
 ---
 
-## NFR-002: Availability
+## Scalability Requirements
 
-| Environment | SLO | Maintenance window | Max downtime/month |
-|------------|-----|-------------------|-------------------|
-| Production | 99.9% | Sundays 2am-4am | 44 minutes |
-| Staging | 95% | No restriction | 36 hours |
-
-**Monthly error budget in production:** 44 minutes
-**Error Budget policy:** If > 50% of the error budget is consumed in the first half of the month,
-feature deploys are frozen until the next month and stability is prioritized.
-
-**Health checks:**
-- `GET /health` — Liveness: responds 200 if the process is alive
-- `GET /health/ready` — Readiness: responds 200 only if it can process traffic (DB connected, dependencies OK)
+| ID | Requirement | Metric | How to verify |
+|----|------------|--------|--------------|
+| NFR-010 | Concurrent users | Support 500 concurrent users per event | Load test simulation |
+| NFR-011 | Real-time seat updates | Handle 100 simultaneous seat reservations | WebSocket stress test |
+| NFR-012 | Database connections | Support up to 200 concurrent database connections | Connection pool monitoring |
+| NFR-013 | Event capacity | Support events with up to 50,000 seats | Database capacity test |
+| NFR-014 | API throughput | Handle 1000 requests per minute peak load | API performance test |
 
 ---
 
-## NFR-003: Scalability
+## Availability & Reliability
 
-| Scenario | Expected behavior |
-|---------|------------------|
-| Gradual load growth | Horizontal auto-scaling activated when CPU > 70% |
-| Sudden spike (Black Friday, etc.) | System scales in < 2 minutes |
-| Load reduction | Scale-down without interrupting active traffic |
-| Horizontal scaling limit | Up to [N] instances per service |
-
-**Strategy:** Stateless horizontal scaling — each instance does not store state in memory.
-State goes in Redis (sessions, cache) or PostgreSQL (persistent data).
+| ID | Requirement | Metric | How to verify |
+|----|------------|--------|--------------|
+| NFR-020 | System uptime | 99.5% monthly availability | Production monitoring |
+| NFR-021 | Payment system availability | 99.9% availability during business hours | Wompi integration monitoring |
+| NFR-022 | Database backup | Automated daily backups with 30-day retention | Backup verification script |
+| NFR-023 | Recovery time | System recovery within 4 hours of failure | Disaster recovery test |
+| NFR-024 | Seat reservation timeout | Automatic release after 15 minutes of inactivity | Timeout mechanism test |
 
 ---
 
-## NFR-004: Security
+## Security Requirements
 
-### Authentication and Authorization
-- All private endpoints require a valid JWT in the `Authorization: Bearer <token>` header
-- JWT tokens expire in **1 hour**
-- Refresh tokens valid for **7 days**
-- RBAC (Role-Based Access Control): roles defined in `00-governance/security-policy.md`
-
-### Data transmission
-- HTTPS mandatory in production (TLS 1.2+)
-- HTTP only in local development
-
-### Sensitive data
-- Passwords: hashing with bcrypt (cost factor ≥ 12) or Argon2id
-- PII (personal data): encrypted at rest
-- Secrets/keys: only in environment variables or vault, **never in code**
-
-### OWASP Top 10
-Code must be reviewed against the OWASP Top 10 on each release.
-Tools: SAST (SonarQube/Snyk), dependency scanning, DAST in staging.
-
-### Regulatory compliance
-- [GDPR / Habeas Data / PCI-DSS / etc.] — as applicable to the project
+| ID | Requirement | Description | How to verify |
+|----|------------|-------------|--------------|
+| NFR-030 | Authentication | JWT tokens with 1-hour expiration, refresh tokens with 7-day expiration | Token lifecycle test |
+| NFR-031 | Password security | Minimum 8 characters, uppercase, lowercase, number, special character | Password validation test |
+| NFR-032 | Account lockout | Lock account after 5 failed login attempts for 30 minutes | Security penetration test |
+| NFR-033 | Data encryption | HTTPS/TLS 1.3 for all client-server communication | SSL certificate validation |
+| NFR-034 | Payment security | PCI DSS compliance through Wompi gateway | Compliance audit |
+| NFR-035 | SQL injection protection | Parameterized queries and input validation | Security code review |
+| NFR-036 | API rate limiting | Maximum 100 requests per minute per user | Rate limiting test |
 
 ---
 
-## NFR-005: Observability
+## Usability & Interface
 
-| Pillar | Requirement | Tool |
-|--------|------------|------|
-| Logs | Structured JSON format + Correlation ID | Winston / Logback |
-| Metrics | RED (Rate, Errors, Duration) per endpoint | Prometheus + Grafana |
-| Traces | End-to-end distributed traces | OpenTelemetry + Jaeger |
-| Alerts | Alert in < 5 min when SLI violates SLO | Alertmanager / PagerDuty |
-
-**Correlation ID:** Each external request generates a UUID correlationId propagated in all logs and spans of that transaction.
-
----
-
-## NFR-006: Maintainability
-
-| Metric | Target |
-|--------|--------|
-| Test coverage | ≥ 80% of lines (≥ 90% in the domain) |
-| Cyclomatic complexity | ≤ 10 per function |
-| Technical debt | Resolution time < 1 sprint from registration |
-| Onboarding time | A new dev can deploy locally in < 1 hour following `10-devops/local-setup.md` |
-| Average build time | < 5 minutes in CI |
+| ID | Requirement | Description | How to verify |
+|----|------------|-------------|--------------|
+| NFR-040 | Responsive design | Support for mobile (320px+) and desktop (1024px+) | Cross-device testing |
+| NFR-041 | Browser compatibility | Chrome 90+, Edge 90+, Safari 14+, Firefox 88+ | Browser compatibility test |
+| NFR-042 | Mobile platform support | Android 11+, iOS 14+ (functional support) | Device testing |
+| NFR-043 | Language support | Spanish, English, Portuguese, Japanese | Internationalization test |
+| NFR-044 | Theme support | Light, dark, purple, blue themes | UI theme validation |
+| NFR-045 | Accessibility | WCAG 2.1 AA compliance for key user flows | Accessibility audit |
 
 ---
 
-## NFR-007: Portability
+## Data & Storage
 
-- All services are deployed as Docker images
-- Images work in any environment with Kubernetes 1.28+
-- No service depends on the host operating system
-- Environment variables are the only source of environment-specific configuration
-
----
-
-## NFR-008: Disaster Recovery (DR / Recovery)
-
-| Scenario | RTO (Recovery Time Objective) | RPO (Recovery Point Objective) |
-|---------|------------------------------|-------------------------------|
-| Single service failure | < 2 minutes (K8s restart) | 0 (stateless) |
-| Primary database failure | < 5 minutes (failover to replica) | < 1 second (synchronous replication) |
-| Availability zone loss | < 15 minutes | < 5 minutes |
-| Full region disaster | < 4 hours (DR in secondary region) | < 1 hour |
+| ID | Requirement | Metric | How to verify |
+|----|------------|--------|--------------|
+| NFR-050 | Database size | Support up to 1TB database size | Storage capacity monitoring |
+| NFR-051 | File storage | Support up to 100GB for event media | File system monitoring |
+| NFR-052 | Data retention | Keep transaction logs for 7 years | Data retention policy verification |
+| NFR-053 | Backup integrity | 99.99% backup success rate | Backup monitoring |
+| NFR-054 | Data consistency | Zero data loss during normal operations | Data integrity checks |
 
 ---
 
-## NFR priority matrix
+## Integration & Compatibility
 
-| NFR | Priority (P1/P2/P3) | Validated in CI? | Owner |
-|-----|---------------------|-----------------|-------|
-| Performance | P1 | Yes (k6 in staging) | [Tech Lead] |
-| Availability | P1 | Yes (health checks) | [DevOps] |
-| Security | P1 | Yes (SAST + OWASP) | [Security] |
-| Scalability | P2 | Manual (quarterly) | [DevOps] |
-| Observability | P1 | Yes (smoke test in CI) | [Tech Lead] |
-| Maintainability | P2 | Yes (coverage in CI) | [Team] |
+| ID | Requirement | Description | How to verify |
+|----|------------|-------------|--------------|
+| NFR-060 | Payment gateway | Integration with Wompi API v2 | API integration test |
+| NFR-061 | Notification services | SMTP email and push notification support | Notification delivery test |
+| NFR-062 | WebSocket support | SockJS for real-time seat updates | WebSocket connectivity test |
+| NFR-063 | Database compatibility | PostgreSQL 17+ required | Database version verification |
+| NFR-064 | API versioning | Maintain backward compatibility for 2 major versions | API compatibility test |
 
 ---
 
-## Correlations
+## Platform Constraints
 
-- Detailed SLOs and SLAs → `13-operations/README.md`
-- Pipeline that validates NFRs → `10-devops/README.md`
-- Incidents related to NFR violations → `13-operations/incident-management.md`
-- Security checklist → `00-governance/security-policy.md`
+| ID | Requirement | Description | Validation |
+|----|------------|-------------|-----------|
+| NFR-070 | Internet connectivity | Required for all system operations | Connection dependency test |
+| NFR-071 | Web platform exclusive | Venue layout design only on web interface | Feature availability verification |
+| NFR-072 | Mobile platform features | Event browsing, seat selection, QR scanning on mobile | Mobile feature test |
+| NFR-073 | Local deployment | All services deployable in local environment | Local deployment test |
+
+---
+
+## Quality & Monitoring
+
+| ID | Requirement | Metric | How to verify |
+|----|------------|--------|--------------|
+| NFR-080 | Code coverage | Minimum 80% unit test coverage | SonarQube analysis |
+| NFR-081 | Build time | Maven build completes in < 5 minutes | CI/CD pipeline monitoring |
+| NFR-082 | Critical vulnerabilities | Zero critical security vulnerabilities | Security scanning |
+| NFR-083 | Code quality | SonarQube Quality Gate passing | Code quality analysis |
+| NFR-084 | Error logging | Comprehensive logging for all critical operations | Log analysis verification |
+
+---
+
+## Hardware & Infrastructure Requirements
+
+### Minimum Server Requirements
+| Component | Specification |
+|-----------|--------------|
+| CPU | 4 cores, 2.0 GHz |
+| RAM | 8 GB |
+| Storage | 100 GB SSD |
+| Network | 100 Mbps |
+
+### Recommended Server Requirements
+| Component | Specification |
+|-----------|--------------|
+| CPU | 8 cores, 2.5 GHz |
+| RAM | 16 GB |
+| Storage | 500 GB SSD |
+| Network | 1 Gbps |
+
+### Development Environment
+| Component | Specification |
+|-----------|--------------|
+| Java | OpenJDK 23+ |
+| Database | PostgreSQL 17 |
+| Container | Docker Desktop 4.0+ |
+| Build Tool | Maven 3.9+ |
+
+---
+
+## Non-Functional Requirements Summary
+
+| Category | Total NFRs | Critical | High Priority | Medium Priority |
+|----------|------------|----------|---------------|----------------|
+| Performance | 6 | 3 | 2 | 1 |
+| Scalability | 5 | 2 | 2 | 1 |
+| Availability | 5 | 1 | 3 | 1 |
+| Security | 7 | 4 | 3 | 0 |
+| Usability | 6 | 0 | 4 | 2 |
+| Data & Storage | 5 | 1 | 2 | 2 |
+| Integration | 5 | 2 | 2 | 1 |
+| Platform | 4 | 2 | 1 | 1 |
+| Quality | 5 | 2 | 2 | 1 |
+| **TOTAL** | **48** | **17** | **21** | **10** |
+
+---
+
+## Implementation Priority Matrix
+
+### Critical (Must Have) - MVP Blockers
+**17 NFRs** que son bloqueadores para el MVP:
+- Autenticación JWT segura
+- Actualizaciones WebSocket en tiempo real
+- Integración con Wompi
+- Compatibilidad móvil y web básica
+
+### High Priority (Should Have) - Enhanced MVP
+**21 NFRs** que mejoran significativamente la experiencia:
+- Rendimiento optimizado de APIs
+- Monitoreo y respaldos
+- Seguridad avanzada
+- Soporte multi-idioma completo
+
+### Medium Priority (Could Have) - Future Enhancements
+**10 NFRs** para versiones futuras:
+- Optimizaciones avanzadas de rendimiento
+- Características de accesibilidad completas
+- Herramientas de monitoreo avanzado
+
+---
+
+## Correlations with other sections
+
+- **Functional Requirements** → `04-requirements/evidence/functional.md`
+- **Architecture Decisions** → `05-architecture/decisions/records/`
+- **Testing Strategy** → `11-quality/testing-strategy.md`
+- **Security Policies** → `00-governance/evidence/security-rules.md`
+- **Performance Testing** → `12-testing/performance-tests.md`
+- **Infrastructure** → `13-deployment/infrastructure.md`
+
+---
+
+## Verification & Monitoring
+
+Cada NFR debe tener:
+1. **Métrica cuantificable** — Valores específicos a cumplir
+2. **Método de verificación** — Cómo validar el cumplimiento
+3. **Herramientas de monitoreo** — Para seguimiento continuo
+4. **Criterios de aceptación** — Definición clara de éxito/fallo
+
+### Tools for NFR Verification
+- **Performance**: K6, JMeter, Apache Bench
+- **Security**: SonarQube, OWASP ZAP, Burp Suite
+- **Quality**: SonarQube, SpotBugs, Checkstyle
+- **Monitoring**: Prometheus, Grafana, ELK Stack
+- **Testing**: JUnit, TestContainers, Selenium

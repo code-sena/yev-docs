@@ -1,121 +1,190 @@
-# Documentation Rules
+# Reglas de Documentación - TuEvento
 
-> These rules determine how documentation is written, organized, and maintained in this project.
-> Documentation that does not follow these rules may be rejected in code review.
-
----
-
-## Core principle
-
-> **"Documentation is code. If it's not up to date, it's broken."**
-
-Every HU that modifies system behavior MUST include updating the affected documents.
-The DoD requires it.
+> Estas reglas determinan cómo se escribe, organiza y mantiene la documentación en el proyecto TuEvento.
+> La documentación que no siga estas reglas puede ser rechazada en code review.
 
 ---
 
-## Language
+## Principio fundamental
 
-| Artifact | Language |
-|----------|----------|
-| Source code (variables, functions, classes) | English |
-| Code comments | English |
-| Commits | English (Conventional Commits) |
-| Branch names | English |
-| Markdown documentation | English |
-| OpenAPI contracts (descriptions) | English |
-| Error messages returned to frontend | English (or localized) |
-| Internal system logs | English |
+> **"La documentación es código. Si no está actualizada, está rota."**
 
-> **Rule:** Once the language for each category is chosen, it is binding for the entire project.
-> Mixing languages in the same category is grounds for PR rejection.
+Cada HU que modifica el comportamiento del sistema DEBE incluir actualizar los documentos afectados.
+El DoD lo requiere.
 
 ---
 
-## File structure
+## Idioma
+
+| Artefacto | Idioma |
+|----------|--------|
+| Código fuente (variables, funciones, clases) | Inglés |
+| Comentarios de código | Español |
+| Commits | Español (Conventional Commits) |
+| Nombres de ramas | Inglés |
+| Documentación Markdown | Español |
+| Contratos OpenAPI (descripciones) | Español |
+| Mensajes de error devueltos al frontend | Español |
+| Logs internos del sistema | Inglés |
+
+> **Regla:** Una vez elegido el idioma para cada categoría, es vinculante para todo el proyecto.
+> Mezclar idiomas en la misma categoría es motivo de rechazo de PR.
+
+---
+
+## Estructura de archivos
 
 ```
-Each section has its README.md that explains the folder's purpose.
-Content documents use kebab-case.md (e.g.: domain-map.md, risk-register.md).
-Templates are prefixed with _ to appear first (e.g.: _template-hu.md, _template-adr.md).
-ADRs are numbered sequentially: ADR-001-short-title.md.
+Cada sección tiene su README.md que explica el propósito de la carpeta.
+Los documentos de contenido usan kebab-case.md (ej: domain-map.md, risk-register.md).
+Las plantillas tienen prefijo _ para aparecer primero (ej: _template-hu.md, _template-adr.md).
+Los ADRs se numeran secuencialmente: ADR-001-titulo-corto.md.
 ```
 
 ---
 
-## What to document and what NOT to
+## Qué documentar y qué NO
 
-### DO document
+### SÍ documentar
 
-| What | Where |
-|------|-------|
-| Non-obvious architectural decisions | `05-architecture/decisions/records/ADR-NNN.md` |
-| Business rules and domain invariants | `02-domain/entities-and-rules.md` |
-| API contracts for each service | `07-api/contracts/openapi/[service].yaml` |
-| Data model changes | `06-data/models.md` |
-| Operational procedures | `13-operations/` |
-| Identified risks | `15-project-control/risks.md` |
+| Qué | Dónde |
+|-----|-------|
+| Decisiones arquitectónicas no obvias | `05-architecture/decisions/records/ADR-NNN.md` |
+| Reglas de negocio e invariantes del dominio | `02-domain/entities-and-rules.md` |
+| Contratos de API para cada servicio | `07-api/contracts/openapi/[servicio].yaml` |
+| Cambios en modelo de datos | `04_Diseno_Software/SQL/[Module].sql` |
+| Procedimientos operacionales | `13-operations/` |
+| Riesgos identificados | `02_Analisis_Software/matriz de riesgos-Tu evento.xlsx` |
 
-### DO NOT document
+### NO documentar
 
-- What the code already says clearly (do not repeat in comments what can be read in the code)
-- Temporary decisions or experiments that will be reverted
-- Implementation details of external libraries (those have their own documentation)
-- Change history (that's what git log is for)
+- Lo que el código ya dice claramente (no repetir en comentarios lo que se puede leer en el código)
+- Decisiones temporales o experimentos que se van a revertir
+- Detalles de implementación de librerías externas (esas tienen su propia documentación)
+- Historial de cambios (para eso está git log)
 
----
+## Responsables por sección
 
-## Owners per section
-
-| Section | Owner | Review frequency |
-|---------|-------|-----------------|
-| `00-governance/` | Tech Lead | Start of each sprint |
-| `02-domain/` | Tech Lead + PO | When the domain changes |
-| `04-requirements/` | Product Owner | Each sprint |
-| `05-architecture/` | Tech Lead | Each design decision |
-| `07-api/contracts/` | Service-owning developer | Each API change |
-| `09-microservices/` | Service-owning developer | Each release |
-| `13-operations/` | DevOps / On-call | After each incident |
-| `15-project-control/` | Tech Lead | Weekly review |
+| Sección | Responsable | Frecuencia de revisión |
+|---------|-------------|----------------------|
+| `00-governance/` | Cristofer David Lozano (Tech Lead) | Inicio de cada sprint |
+| `01_Especificacion_Requisitos/` | Cristofer David Lozano (Product Owner) | Cada sprint |
+| `02_Analisis_Software/` | Ambos integrantes | Cuando cambia el análisis |
+| `04_Diseno_Software/` | Cristofer David Lozano (Backend) | Cada cambio de modelo |
+| `05-architecture/` | Cristofer David Lozano (Tech Lead) | Cada decisión de diseño |
+| `06_Pruebas/` | Jhampier Santos Ortiz (QA) | Cada release |
+| `07_Implementacion/` | Jhampier Santos Ortiz (DevOps) | Después de cada incidente |
+| `09_Manuales/` | Ambos integrantes | Cada release mayor |
 
 ---
 
-## Document format
+## Formato de documentos
 
-### Headings
-- `# H1` — only one per file; it is the title
-- `## H2` — main sections
-- `### H3` — subsections
-- Do not use H4 or deeper; if you need it, the document has too much hierarchy
+| Rol | Responsabilidad en governance |
+|-----|------------------------------|
+| **Tech Lead** | Cristofer David Lozano - Velar por el cumplimiento de todas las reglas técnicas |
+| **Scrum Master** | Jhampier Santos Ortiz - Asegurar que las ceremonias y DoD/DoR se cumplan |
+| **Desarrolladores** | Ambos integrantes - Seguir las convenciones de código, git y documentación |
+| **Todo el equipo** | Ambos integrantes - Proponer mejoras y cambios a las reglas cuando sea necesario |
 
-### Tables
-Use tables for comparisons, registers, and matrices. Do not use tables for simple lists.
+---
 
-### Code
-Always use code blocks with the language specified:
+## Formato de documentos
+
+### Encabezados
+- `# H1` — solo uno por archivo; es el título
+- `## H2` — secciones principales
+- `### H3` — subsecciones
+- No usar H4 o más profundo; si lo necesitas, el documento tiene demasiada jerarquía
+
+### Tablas
+Usar tablas para comparaciones, registros y matrices. No usar tablas para listas simples.
+
+### Código
+Siempre usar bloques de código con el lenguaje especificado:
 ````
-```typescript
-const x = 1;
+```sql
+CREATE TABLE event (
+    event_id INT AUTO_INCREMENT PRIMARY KEY
+);
 ```
 ````
 
-### Template instructions
-Blocks marked `> [!NOTE] INSTRUCTIONS` indicate the document is an unfilled template.
-Remove them when the document is complete.
+### Instrucciones de plantilla
+Los bloques marcados `> [!NOTE] INSTRUCCIONES` indican que el documento es una plantilla sin llenar.
+Eliminarlos cuando el documento esté completo.
 
 ---
 
-## Update process
+## Proceso de actualización
 
-1. The developer identifies which documents their change affects
-2. Updates the documents together with the code (same PR)
-3. The reviewer verifies the documentation is up to date
-4. If the PR closes a HU that had API impact → the OpenAPI contract must be updated
+1. El desarrollador identifica qué documentos afecta su cambio
+2. Actualiza los documentos junto con el código (mismo PR)
+3. El reviewer verifica que la documentación esté actualizada
+4. Si el PR cierra una HU que tuvo impacto de API → el contrato OpenAPI debe estar actualizado
 
 ---
 
-## Correlations
+## Específico para TuEvento
 
-- Git conventions → `00-governance/git-conventions.md`
-- Per-microservice documentation standard → `00-governance/microservices-documentation.md`
-- Definition of Done (docs as part of DoD) → `00-governance/definition-of-done.md`
+### Referencias entre documentos
+Usar paths relativos para referencias:
+```markdown
+- Módulo de pagos → `04_Diseno_Software/SQL/Payment module.sql`
+- Matriz de riesgos → `02_Analisis_Software/matriz de riesgos-Tu evento.xlsx`
+- Historias de usuario → `01_Especificacion_Requisitos/Historias_Usuario_TuEvento.docx`
+```
+
+### Naming conventions para archivos SQL:
+```
+[Module] module.sql
+Ejemplos:
+- Event module.sql
+- Payment module.sql
+- Security module.sql
+```
+
+### Versionado de documentos importantes:
+- Los contratos de API usan versionado semántico
+- Los cambios de esquema de BD se documentan con fecha
+- Los ADRs no se modifican, se crean nuevos que anulan anteriores
+
+### Herramientas del proyecto:
+- **Diagramas:** Draw.io, PlantUML, Mermaid
+- **Mockups:** Figma, Balsamiq
+- **Documentos:** Markdown + Word para entregables formales
+- **Versionado:** Git para toda la documentación
+
+---
+
+## Correlaciones
+
+- Convenciones git → `00-governance/git-conventions.md`
+- Estándar de documentación por microservicio → `00-governance/microservices-documentation.md`
+- Definition of Done (docs como parte de DoD) → `00-governance/definition-of-done.md`
+- Arquitectura del proyecto → `04_Diseno_Software/Diagrama de arquitectura.png`
+---
+
+## Configuración específica TuEvento
+
+### Herramientas de diseño
+- **UX/UI Mockups:** Figma (referencia en carpeta `11_Prototipo/Mockup/`)
+- **Diagramas técnicos:** Draw.io + PlantUML
+- **Diagramas de arquitectura:** Disponibles en `04_Diseno_Software/`
+- **User flows:** Documentados en `11_Prototipo/User Flow/`
+
+### Métricas de calidad
+- **Cobertura de código:** > 80% (JaCoCo + Vitest)
+- **Tiempo de build:** < 5 minutos (Jenkins)
+- **Performance API:** < 200ms respuesta
+- **Vulnerabilidades críticas:** 0 permitidas
+
+### Stack tecnológico completo
+- **Backend:** Java 23 + Spring Boot (localhost:8080)
+- **Frontend Web:** Vite + React (localhost:5173)
+- **Mobile:** Expo + React Native
+- **Base de datos:** PostgreSQL 17 (localhost:5432/tuevento_db)
+- **Tiempo real:** SockJS WebSockets
+- **Autenticación:** JWT + Refresh Token (HS256, 24h)
+- **Pagos:** Wompi (Tarjeta, PSE, Nequi, Efectivo, COP)
+- **DevOps:** Jenkins + SonarQube + Docker + Kubernetes

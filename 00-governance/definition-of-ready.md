@@ -1,65 +1,92 @@
-# Definition of Ready (DoR)
+# Definition of Ready (DoR) - TuEvento
 
-> A User Story is **Ready** when the entire team can start it in the next sprint
-> without needing to resolve fundamental questions mid-sprint.
-> If a story doesn't meet this DoR, it goes back to refinement.
-
----
-
-## DoR checklist
-
-Before moving a User Story to "Ready for Sprint", verify:
-
-### Clarity
-
-- [ ] The story is written in the format: **As [role], I want [action], so that [benefit]**
-- [ ] The role is specific (not "as a user" — "as an authenticated buyer")
-- [ ] The expected benefit is clear and verifiable
-
-### Acceptance Criteria
-
-- [ ] There are at least 2 acceptance criteria written in **Given / When / Then** format
-- [ ] The criteria cover the happy path AND the main error cases
-- [ ] The criteria are testable (it is possible to write an automated test for each one)
-- [ ] There are no ambiguous criteria ("the response should be fast" is not valid)
-
-### Dependencies
-
-- [ ] All external dependencies (other services, APIs, data) are identified
-- [ ] Blocking dependencies are resolved OR a workaround is defined
-- [ ] If it depends on another story, that story is already Done or In Progress
-
-### Estimation
-
-- [ ] The team has estimated the story (story points or t-shirt size)
-- [ ] There is agreement that the story fits in one sprint
-- [ ] If it's too large, it has been broken down into smaller stories
-
-### Technical readiness
-
-- [ ] The necessary accesses and environments are available
-- [ ] The API contracts (OpenAPI) are defined if the story involves new endpoints
-- [ ] There is a definition of the data model if there are DB changes
-- [ ] The impact on other services is identified
-
-### Non-functional requirements
-
-- [ ] Performance requirements are specified (if applicable)
-- [ ] Security requirements are considered (authentication, authorization, validations)
-- [ ] Observability requirements are included (logs, metrics, traces)
+> Una Historia de Usuario está **Ready** cuando todo el equipo puede empezarla en el próximo sprint
+> sin necesidad de resolver preguntas fundamentales a mitad del sprint.
+> Si una historia no cumple este DoR, regresa a refinamiento.
 
 ---
 
-## Common reasons a story is NOT ready
+## Checklist DoR
 
-| Problem | What to do |
+Antes de mover una Historia de Usuario a "Ready for Sprint", verificar:
+
+### Claridad
+
+- [ ] La historia está escrita en formato: **Como [rol], quiero [acción], para que [beneficio]**
+- [ ] El rol es específico (no "como usuario" — "como organizador autenticado")
+- [ ] El beneficio esperado es claro y verificable
+
+### Criterios de Aceptación
+
+- [ ] Hay al menos 2 criterios de aceptación escritos en formato **Dado / Cuando / Entonces**
+- [ ] Los criterios cubren el flujo feliz Y los principales casos de error
+- [ ] Los criterios son testeable (es posible escribir un test automatizado para cada uno)
+- [ ] No hay criterios ambiguos ("la respuesta debe ser rápida" no es válido)
+
+### Dependencias
+
+- [ ] Todas las dependencias externas (otros servicios, APIs, datos) están identificadas
+- [ ] Las dependencias bloqueantes están resueltas O se definió un workaround
+- [ ] Si depende de otra historia, esa historia ya está Done o In Progress
+
+### Estimación
+
+- [ ] El equipo ha estimado la historia (story points o t-shirt size)
+- [ ] Hay acuerdo en que la historia cabe en un sprint
+- [ ] Si es muy grande, se ha dividido en historias más pequeñas
+
+### Preparación técnica
+
+- [ ] Los accesos y ambientes necesarios están disponibles
+- [ ] Los contratos de API están definidos si la historia involucra nuevos endpoints
+- [ ] Hay definición del modelo de datos si hay cambios de BD
+- [ ] El impacto en otros servicios está identificado
+
+### Requerimientos no funcionales
+
+- [ ] Requerimientos de performance especificados (si aplica)
+- [ ] Consideraciones de seguridad incluidas (autenticación, autorización, validaciones)
+- [ ] Requerimientos de observabilidad incluidos (logs, métricas, trazas)
+
+### Específico para módulos TuEvento
+
+#### Para historias del módulo Events
+- [ ] Mockups o wireframes disponibles si hay cambios de UI
+- [ ] Validaciones de negocio definidas (fechas, capacidad, overlapping)
+- [ ] Estados del evento especificados claramente
+- [ ] Integración con módulo Site definida
+
+#### Para historias del módulo Payments
+- [ ] Gateway de pago especificado (Wompi, PSE, etc.)
+- [ ] Flujo de estados de pago documentado
+- [ ] Manejo de errores y refunds definido
+- [ ] Integración con Wallet especificada
+
+#### Para historias del módulo Tickets
+- [ ] Formato de código QR especificado
+- [ ] Proceso de check-in definido
+- [ ] Manejo de boletos de cortesía clarificado
+- [ ] Integración con Seats definida
+
+#### Para historias del módulo Security
+- [ ] Roles y permisos especificados
+- [ ] Flujo de autenticación definido
+- [ ] Criterios de validación de sesión
+- [ ] Logs de auditoría requeridos
+
+---
+
+## Razones comunes por las que una historia NO está ready
+
+| Problema | Qué hacer |
 |---------|-----------|
-| Unclear requirements | Schedule a 30-min refinement session with the PO |
-| Missing acceptance criteria | PO adds criteria before the next sprint |
-| Unknown dependencies | Tech Lead reviews and documents dependencies |
-| Too large (> 8 SP) | Break it down into smaller stories |
-| No access to test environment | DevOps generates credentials before sprint |
-| Unclear API contract | Agree on contract (OpenAPI) before starting |
+| Requerimientos poco claros | Programar sesión de refinamiento de 30min con PO |
+| Faltan criterios de aceptación | PO agrega criterios antes del siguiente sprint |
+| Dependencias desconocidas | Tech Lead revisa y documenta dependencias |
+| Muy grande (> 8 SP) | Dividirla en historias más pequeñas |
+| Sin acceso a ambiente de pruebas | DevOps genera credenciales antes del sprint |
+| Contrato de API poco claro | Acordar contrato (OpenAPI) antes de empezar |
+| Modelo de datos indefinido | Definir esquema SQL en el módulo correspondiente |
 
 ---
 
@@ -67,14 +94,43 @@ Before moving a User Story to "Ready for Sprint", verify:
 
 | | Definition of Ready (DoR) | Definition of Done (DoD) |
 |-|--------------------------|--------------------------|
-| **When** | Before starting the story | After finishing the story |
-| **Who verifies** | Team in planning/refinement | Team in review |
-| **Purpose** | Ensure the team can start without blockers | Ensure the increment is shippable |
+| **Cuándo** | Antes de empezar la historia | Después de terminar la historia |
+| **Quién verifica** | Equipo en planning/refinement | Equipo en review |
+| **Propósito** | Asegurar que el equipo puede empezar sin bloqueos | Asegurar que el incremento es desplegable |
 
 ---
 
-## Correlations
+## Plantillas de criterios de aceptación
 
-- Full DoD → `00-governance/definition-of-done.md`
-- User Story template → `04-requirements/_template-hu.md`
-- User Stories backlog → `04-requirements/user-stories.md`
+### Para funcionalidad de Events:
+```
+Dado que soy un organizador autenticado
+Cuando creo un evento con fecha [específica] y capacidad [número]
+Entonces el sistema debe [acción específica]
+Y debo poder [verificación]
+```
+
+### Para funcionalidad de Payments:
+```
+Dado que tengo un carrito con boletos por valor $[monto]
+Cuando selecciono el método de pago [método]
+Entonces el sistema debe [procesar/validar/confirmar]
+Y el estado del pago debe ser [estado específico]
+```
+
+### Para funcionalidad de Security:
+```
+Dado que soy un usuario con rol [rol específico]
+Cuando intento acceder a [recurso específico]
+Entonces el sistema debe [permitir/denegar]
+Y debe registrar [log específico]
+```
+
+---
+
+## Correlaciones
+
+- DoD completo → `00-governance/definition-of-done.md`
+- Plantilla de historia de usuario → `01_Especificacion_Requisitos/Historias_Usuario_TuEvento.docx`
+- Backlog de historias → `01_Especificacion_Requisitos/`
+- Módulos SQL → `04_Diseno_Software/SQL/`

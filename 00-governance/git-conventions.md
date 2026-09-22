@@ -1,100 +1,127 @@
-# Git Conventions
+# Convenciones Git - TuEvento
 
-> **Read this document before making your first commit on the project.**
+> **Lee este documento antes de hacer tu primer commit en el proyecto TuEvento.**
 
-## Branch strategy
+## Estrategia de ramas
 
 ```
-main        ← Production. Merge from release only. Always stable.
-  └── dev   ← Continuous integration. Merge from features.
-        └── feat/[description]    ← One branch per feature/user story
-        └── fix/[description]     ← One branch per bugfix
-        └── chore/[description]   ← Infrastructure, docs, dependency changes
-        └── hotfix/[description]  ← Urgent fixes directly to main
+main        ← Producción. Merge solo desde release. Siempre estable.
+  └── dev   ← Integración continua. Merge desde features.
+        └── feat/[descripcion]     ← Una rama por feature/historia de usuario
+        └── fix/[descripcion]      ← Una rama por bugfix
+        └── chore/[descripcion]    ← Infraestructura, docs, dependencias
+        └── hotfix/[descripcion]   ← Fixes urgentes directo a main
 ```
 
-**Rules:**
-- Nobody commits directly to `main` or `dev`
-- Every task = one branch + one Pull Request
-- One branch = one task (do not mix different features)
-- Branches are deleted after merge
+**Reglas:**
+- Nadie hace commit directo a `main` o `dev`
+- Cada tarea = una rama + un Pull Request
+- Una rama = una tarea (no mezclar diferentes features)
+- Las ramas se eliminan después del merge
 
 ---
 
-## Branch naming format
+## Formato de nombres de ramas
 
 ```
-[type]/[description-in-kebab-case]
+[tipo]/[descripcion-en-kebab-case]
 
-Examples:
-feat/oauth2-login
-fix/schedule-overlap-calculation
-chore/update-spring-dependencies
-hotfix/null-token-expiration
+Ejemplos:
+feat/autenticacion-oauth2
+fix/calculo-overlap-horarios
+chore/actualizar-dependencias-spring
+hotfix/expiracion-token-nulo
 ```
 
 ---
 
-## Commit format (Conventional Commits)
+## Formato de commits (Conventional Commits)
 
 ```
-[type]([scope]): [lowercase description, imperative mood, no trailing period]
+[tipo]([scope]): [descripción en minúsculas, modo imperativo, sin punto final]
 
-[optional body — explain WHY, not what]
+[cuerpo opcional — explica el POR QUÉ, no el qué]
 
-[optional footer — issue/user story references]
+[footer opcional — referencias a issues/historias de usuario]
 ```
 
-**Types:**
-| Type | When to use |
-|------|-------------|
-| `feat` | New functionality |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Formatting, whitespace (no logic change) |
-| `refactor` | Code refactoring without behavior change |
-| `test` | Add or modify tests |
-| `chore` | Tooling, dependencies, CI |
-| `perf` | Performance improvement |
+**Tipos:**
+| Tipo | Cuándo usarlo |
+|------|---------------|
+| `feat` | Nueva funcionalidad |
+| `fix` | Corrección de bug |
+| `docs` | Solo documentación |
+| `style` | Formato, espacios en blanco (sin cambio de lógica) |
+| `refactor` | Refactoring de código sin cambio de comportamiento |
+| `test` | Agregar o modificar tests |
+| `chore` | Tooling, dependencias, CI |
+| `perf` | Mejora de performance |
 
-**Examples:**
+**Ejemplos:**
 ```
-feat(iam): implement JWT login
+feat(events): implementar creación de eventos
 
-fix(scheduling): correct schedule overlap validation
+fix(payments): corregir validación de overlapping de horarios
 Closes #42
 
-docs(api): update actor service OpenAPI contract
+docs(api): actualizar contrato OpenAPI del servicio de eventos
 
-chore(deps): upgrade Spring Boot to 3.2.0
+chore(deps): actualizar Spring Boot a 3.2.0
 ```
 
 ---
 
-## Pull Request policy
+## Política de Pull Requests
 
-- **Size:** maximum 400 lines of code (excluding tests). If larger, split it.
-- **Reviewers:** minimum 1 approval before merging
-- **Review time:** reviewer has a maximum of 24 business hours
-- **Template:** use the template at `.github/pull_request_template.md`
-- **Green CI:** merge only proceeds if all pipeline checks pass
-
----
-
-## Merge policy
-
-- Use **Squash and Merge** for features (keeps `dev` history clean)
-- Use **Merge Commit** for releases to `main` (preserves full history)
-- **Do not** use Rebase & Merge (creates confusion in shared history)
+- **Tamaño:** máximo 400 líneas de código (excluyendo tests). Si es mayor, dividir.
+- **Reviewers:** mínimo 1 aprobación antes del merge
+- **Tiempo de review:** el reviewer tiene máximo 24 horas hábiles
+- **Template:** usar el template en `.github/pull_request_template.md`
+- **CI verde:** el merge solo procede si todos los checks del pipeline pasan
 
 ---
 
-## Tags and versioning
+## Política de merge
 
-Follow [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`
+- Usar **Squash and Merge** para features (mantiene el historial de `dev` limpio)
+- Usar **Merge Commit** para releases a `main` (preserva historial completo)
+- **NO usar** Rebase & Merge (crea confusión en historial compartido)
+
+---
+
+## Tags y versionado
+
+Seguir [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`
 
 ```bash
-# When releasing to production
-git tag -a v1.2.0 -m "Release v1.2.0: add reports module"
+# Al hacer release a producción
+git tag -a v1.2.0 -m "Release v1.2.0: agregar módulo de reportes"
 git push origin v1.2.0
 ```
+
+---
+
+## Contexto específico TuEvento
+
+### Scopes recomendados para commits:
+- `events` - Funcionalidad de eventos
+- `payments` - Sistema de pagos
+- `tickets` - Gestión de boletos
+- `users` - Gestión de usuarios
+- `security` - Autenticación y autorización
+- `notifications` - Sistema de notificaciones
+- `api` - Cambios en APIs REST
+- `db` - Migraciones y cambios de BD
+- `tests` - Suite de testing
+- `docs` - Documentación
+
+### Branches protegidas:
+- `main`: Requiere PR + 1 aprobación + CI verde
+- `dev`: Requiere PR + CI verde
+
+### Integración con metodología Scrum:
+- Crear rama al empezar una historia de usuario
+- Commit frecuente durante el desarrollo
+- PR al completar historia de usuario
+- Merge a `dev` después de review
+- Release desde `dev` a `main` al final del sprint

@@ -1,156 +1,256 @@
-# Domain Map — Bounded Contexts
+# Domain Map — TuEvento Bounded Contexts
 
-> **What to fill in here:** The domain map is the central DDD (Domain-Driven Design) artifact.
-> It defines the system's boundaries and how they relate to each other.
-> Build it first with the team and domain experts in an Event Storming session.
-
-## Before filling in this document: Event Storming
-
-**Event Storming** is a collaborative workshop for modeling the domain before writing code.
-It lasts 2–4 hours with the whole team (dev + PO + business expert).
-
-**Materials:** Long wall, 4-color sticky notes, markers.
-
-**Standard colors:**
-| Color | Represents | Example |
-|-------|-----------|---------|
-| 🟠 Orange | **Domain events** (something that happened, past tense) | `AppointmentScheduled`, `PaymentReceived` |
-| 🔵 Blue | **Commands** (action that triggers the event) | `ScheduleAppointment`, `ProcessPayment` |
-| 🟡 Yellow | **Actors** (who executes the command) | `Patient`, `Doctor`, `Admin` |
-| 🩷 Pink | **External systems** or integration points | `Payment Gateway`, `Email SMTP` |
-
-**Session steps:**
-1. (30 min) Post all events that occur in the business, in chronological order, on the wall
-2. (30 min) Identify which command or actor triggers each event
-3. (45 min) Group related events — each group is a candidate Bounded Context
-4. (30 min) Draw relationships between Bounded Contexts (who depends on whom)
-5. (30 min) Discuss the resulting map and agree on names
-
-**Result:** The session output directly feeds the 3 documents in `02-domain/`:
-- Identified events → `domain-events.md`
-- Entities and their rules → `entities-and-rules.md`
-- Bounded Contexts and their map → this document
-
----
+> **Domain Map for TuEvento** — Sistema de gestión de eventos desarrollado por CapySoft.
+> Este mapa define los 7 bounded contexts principales basados en el análisis de los 14 módulos de base de datos.
 
 ---
 
 ## 1. Domain overview
 
-> One paragraph of context about the business and what problem the system solves.
-> Write it without technical terms — it must be readable by a business expert.
+**TuEvento** es una plataforma web y móvil que gestiona el ciclo completo de eventos desde la creación hasta la validación de ingreso. Los **organizadores** diseñan eventos con layout de asientos, gestionan ventas y controlan acceso. Los **asistentes** descubren eventos, compran boletos con selección de asientos en tiempo real, procesan pagos y validan ingreso via QR.
 
-```
-[Describe the business domain here. E.g.: "The system manages the complete cycle of
-[X] reservations, from the customer's request through to confirmation and billing."]
-```
+El sistema maneja múltiples roles (organizadores, asistentes, administradores), procesa pagos a través de Wompi, y soporta notificaciones multicanal con internacionalización completa.
 
 ---
 
 ## 2. Identified Bounded Contexts
 
-A **Bounded Context** is the explicit boundary within which a particular domain model
-has consistent meaning. Each bounded context has its own Ubiquitous Language.
-
-> **Signs of a good bounded context:**
-> - Has a clear responsible team
-> - Has its own database
-> - Can be deployed independently
-> - The same term in two different contexts can mean different things
-
-### Bounded Context: [Name — e.g.: User Management]
+### Bounded Context: Security & Identity
 
 | Field | Value |
 |-------|-------|
-| **Name** | [ContextName] |
-| **Responsibility** | [What this context captures in one sentence] |
-| **Owning team** | [Responsible team or person] |
-| **Microservice(s)** | [service-name, service2-name] |
-| **Database** | [PostgreSQL / MongoDB / Redis / etc.] |
-| **Ubiquitous Language** | [Key business terms in this context] |
+| **Name** | Security & Identity |
+| **Responsibility** | Gestionar autenticación, autorización, roles y permisos de usuarios |
+| **Owning team** | Ambos integrantes (Cristofer + Jhampier) |
+| **Microservice(s)** | auth-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | User, Role, Permission, Session, Token |
 
-**Context-specific terms (Ubiquitous Language):**
+**Context-specific terms:**
 
 | Term | Meaning in THIS context | Different in another context? |
 |------|------------------------|-------------------------------|
-| [User] | [Person with an active account] | [Yes — in Billing it's "Client"] |
-| [Account] | [Set of credentials] | [No] |
+| User | Entidad con credenciales y rol del sistema | No |
+| Organizer | Usuario con rol ORGANIZER que puede crear eventos | Sí — en Events es "event owner" |
+| Session | Token de acceso JWT + refresh token activo | No |
+| Activation | Proceso de verificar email mediante código | No |
+
+**Core entities:** `user`, `role`, `permission`, `auth_session`, `refresh_token`
 
 ---
 
-### Bounded Context: [Name — e.g.: Order Management]
+### Bounded Context: Event Management
 
 | Field | Value |
 |-------|-------|
-| **Name** | [ContextName] |
-| **Responsibility** | |
-| **Owning team** | |
-| **Microservice(s)** | |
-| **Database** | |
-| **Ubiquitous Language** | |
+| **Name** | Event Management |
+| **Responsibility** | Crear, publicar, gestionar eventos y su configuración de venue |
+| **Owning team** | Cristofer (lead) + Jhampier (support) |
+| **Microservice(s)** | event-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Event, Venue, Layout, Category, Rating |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Event | Evento con fechas, venue y capacidad | No |
+| Layout | Configuración gráfica JSONB del venue | No |
+| Site | Recinto físico donde se realiza el evento | Sí — en otros contextos es "location" |
+| Status | Estado del evento (draft/published/cancelled/finished) | Sí — otros contextos tienen estados diferentes |
+
+**Core entities:** `event`, `event_layout`, `site`, `category`, `event_rating`
+
+---
+
+### Bounded Context: Seating & Venue
+
+| Field | Value |
+|-------|-------|
+| **Name** | Seating & Venue |
+| **Responsibility** | Gestionar asientos, secciones y disponibilidad en tiempo real |
+| **Owning team** | Cristofer (lead - WebSockets specialist) |
+| **Microservice(s)** | seating-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Seat, Section, Block, Availability, Reservation |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Seat | Asiento individual con coordenadas y estado | No |
+| Section | Zona del venue (platea, palco, general) | No |
+| Block | Agrupación de asientos dentro de una sección | No |
+| Status | Estado del asiento (available/reserved/sold/blocked) | Sí — diferente a event status |
+
+**Core entities:** `seat`, `event_section`, `section_type`, `seat_block`
+
+---
+
+### Bounded Context: Ticketing & Orders
+
+| Field | Value |
+|-------|-------|
+| **Name** | Ticketing & Orders |
+| **Responsibility** | Generar boletos, gestionar órdenes y validar ingresos |
+| **Owning team** | Jhampier (lead) + Cristofer (support) |
+| **Microservice(s)** | ticket-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Ticket, Order, QR Code, Check-in, Validation |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Ticket | Boleto con QR único vinculado a asientos | No |
+| Order | Orden de compra con múltiples tickets | Sí — en Payments es "payment order" |
+| Check-in | Validación de ingreso al evento | No |
+| Code | Código alfanumérico único del ticket | Sí — en Security es "activation code" |
+
+**Core entities:** `ticket`, `order`, `seat_ticket`, `ticket_checkin`
+
+---
+
+### Bounded Context: Payment Processing
+
+| Field | Value |
+|-------|-------|
+| **Name** | Payment Processing |
+| **Responsibility** | Procesar pagos, reembolsos y gestión de billetera digital |
+| **Owning team** | Cristofer (Wompi integration) + Jhampier (wallet) |
+| **Microservice(s)** | payment-service, wallet-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Payment, Gateway, Wallet, Transaction, Refund |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Payment | Transacción procesada por Wompi | No |
+| Order | Orden financiera vinculada a tickets | Sí — en Ticketing es "ticket order" |
+| Wallet | Billetera virtual del usuario | No |
+| Transaction | Movimiento de dinero (recarga/pago/reembolso) | No |
+
+**Core entities:** `payment`, `wallet`, `wallet_transaction`, `refund`
+
+---
+
+### Bounded Context: Notifications & Communication
+
+| Field | Value |
+|-------|-------|
+| **Name** | Notifications & Communication |
+| **Responsibility** | Envío multicanal de notificaciones y gestión de entregas |
+| **Owning team** | Jhampier (lead) + Cristofer (WebSockets) |
+| **Microservice(s)** | notification-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Notification, Channel, Delivery, Template, Recipient |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Channel | Canal de entrega (email, push, SMS) | No |
+| Notification | Mensaje enviado a usuario con estado de entrega | No |
+| Template | Plantilla de mensaje con variables | No |
+| Delivery | Estado de entrega (pending/sent/delivered/failed) | No |
+
+**Core entities:** `notification`, `channel`, `notification_user`, `notification_type`
+
+---
+
+### Bounded Context: User Profile & Preferences
+
+| Field | Value |
+|-------|-------|
+| **Name** | User Profile & Preferences |
+| **Responsibility** | Gestionar perfiles públicos, preferencias e historial de usuarios |
+| **Owning team** | Jhampier (lead) + Cristofer (activity tracking) |
+| **Microservice(s)** | profile-service |
+| **Database** | PostgreSQL (tuevento_db) |
+| **Ubiquitous Language** | Profile, Preferences, Theme, Language, Activity |
+
+**Context-specific terms:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|------|------------------------|-------------------------------|
+| Profile | Información pública del usuario | No |
+| Theme | Tema visual (light/dark/purple/blue) | No |
+| Language | Idioma de interfaz (ES/EN/PT/JA) | No |
+| Activity | Registro de acciones del usuario | No |
+
+**Core entities:** `profile`, `preferences`, `activity_log`, `theme`, `language`
 
 ---
 
 ## 3. Context Map
 
-The Context Map shows relationships between bounded contexts. Relationships define
-how contexts communicate and who holds the "power" in the integration.
-
 ```
-┌─────────────────────┐        ┌──────────────────────┐
-│  [Context A]        │        │  [Context B]         │
-│                     │──────▶│                      │
-│  Domain:            │  D→C  │  Domain:             │
-│  [responsibility]   │       │  [responsibility]    │
-└─────────────────────┘       └──────────────────────┘
-                                        │
-                               D→C      │
-                                        ▼
-                              ┌──────────────────────┐
-                              │  [Context C]         │
-                              │                      │
-                              │  [responsibility]    │
-                              └──────────────────────┘
+┌─────────────────────┐    events/users    ┌──────────────────────┐
+│  Security &         │◄──────────────────►│  Event Management    │
+│  Identity           │                    │                      │
+│                     │                    │  Domain: eventos,    │
+│  Domain: users,     │                    │  venues, categorías  │
+│  auth, permisos     │                    └──────────────────────┘
+└─────────────────────┘                             │
+         │                                          │ event/layout
+         │ user/profile                             ▼
+         ▼                               ┌──────────────────────┐
+┌─────────────────────┐                 │  Seating & Venue     │
+│  User Profile &     │                 │                      │
+│  Preferences        │                 │  Domain: asientos,   │
+│                     │◄────────────────┤  secciones, bloques  │
+│  Domain: perfil,    │  user/activity  └──────────────────────┘
+│  preferencias, tema │                             │
+└─────────────────────┘                             │ seat/reservation
+                                                    ▼
+┌─────────────────────┐    notifications  ┌──────────────────────┐
+│  Notifications &    │◄──────────────────┤  Ticketing & Orders  │
+│  Communication      │                   │                      │
+│                     │                   │  Domain: tickets,    │
+│  Domain: notif,     │                   │  órdenes, check-in   │
+│  canales, entrega   │                   └──────────────────────┘
+└─────────────────────┘                             │
+         ▲                                          │ order/payment
+         │                                          ▼
+         │ payment/notification       ┌──────────────────────┐
+         └────────────────────────────┤  Payment Processing  │
+                                      │                      │
+                                      │  Domain: pagos,      │
+                                      │  wallet, reembolsos  │
+                                      └──────────────────────┘
 ```
-
-### Context relationship types
-
-| Type | Symbol | Description | Example |
-|------|--------|-------------|---------|
-| **Upstream → Downstream** | `U → D` | U provides, D consumes. D depends on U. | Auth → Orders |
-| **Shared Kernel** | `SK` | Two teams share part of the model | Shared User ID |
-| **Customer/Supplier** | `C/S` | Supplier (U) negotiates with Customer (D) | Inventory → Sales |
-| **Conformist** | `CONF` | D adopts U's model without negotiating | Legacy integration |
-| **Anti-Corruption Layer** | `ACL` | D translates U's model to protect itself | Gateway → External API |
-| **Open Host Service** | `OHS` | U publishes a published protocol | Event Bus, REST API |
-| **Published Language** | `PL` | Explicit shared language | OpenAPI spec, events |
 
 ### Relationships table
 
-| Context A | Relationship | Context B | Communication channel | Contract |
-|-----------|-------------|-----------|----------------------|---------|
-| [Context A] | U → D | [Context B] | REST / Event | OpenAPI / AsyncAPI |
-| [Context B] | ACL | [Context C] | Adapter | Internal interface |
+| Context A | Relationship | Context B | Communication | Contract |
+|-----------|-------------|-----------|--------------|----------|
+| Security & Identity | U → D | Event Management | REST API | User authentication |
+| Event Management | U → D | Seating & Venue | WebSockets + REST | Event and layout data |
+| Seating & Venue | U → D | Ticketing & Orders | WebSockets + Events | Seat reservations |
+| Ticketing & Orders | U → D | Payment Processing | Events + REST | Order payments |
+| Payment Processing | U → D | Notifications | Domain Events | Payment notifications |
+| User Profile | C/S | Security & Identity | Shared User ID | User profile sync |
+| Notifications | OHS | ALL CONTEXTS | Event Bus | System-wide notifications |
+
+**Legend:**
+- **U → D**: Upstream → Downstream (dependency)  
+- **C/S**: Customer/Supplier (negotiated relationship)
+- **OHS**: Open Host Service (public protocol)
 
 ---
 
 ## 4. Core Domain, Supporting, Generic
 
-DDD classifies subdomains by their strategic value:
-
-| Type | Description | Investment | Example |
-|------|-------------|-----------|---------|
-| **Core Domain** | Where the business competitive advantage lies. What differentiates us. | MAXIMUM — build, don't buy | Matching algorithm |
-| **Supporting Subdomain** | Necessary for the core but not differentiating. Can be outsourced. | MEDIUM | Order management |
-| **Generic Subdomain** | Commodity. Off-the-shelf solution exists. | MINIMUM — buy/use OSS | Authentication, emails |
-
-### Classification of this project's bounded contexts
-
-| Bounded Context | Type | Justification |
-|----------------|------|---------------|
-| [Context A] | Core | [why it is the heart of the business] |
-| [Context B] | Supporting | [why it supports without being differentiating] |
-| [Context C] | Generic | [standard solution available] |
+| Bounded Context | Type | Investment | Justification |
+|----------------|------|-----------|---------------|
+| **Event Management** | Core Domain | MAXIMUM | Diferenciador clave: layout designer, configuración de venues |
+| **Seating & Venue** | Core Domain | MAXIMUM | Competencia principal: tiempo real, WebSockets, UX selector |
+| **Ticketing & Orders** | Core Domain | HIGH | Lógica de negocio específica: QR, check-in, validaciones |
+| **Payment Processing** | Supporting | MEDIUM | Necesario pero no diferenciador (Wompi integration) |
+| **Security & Identity** | Generic | MINIMUM | Commodity: JWT estándar, OAuth social |
+| **Notifications** | Generic | MINIMUM | Commodity: SMTP, push notifications estándar |
+| **User Profile** | Supporting | MEDIUM | Soporte necesario para personalización |
 
 ---
 
@@ -158,29 +258,30 @@ DDD classifies subdomains by their strategic value:
 
 ### How were these decisions made?
 
-> Document the Event Storming session or the process you used to arrive at the map.
-> If you changed the map, explain why.
-
-- **Event Storming session:** [date], [participants]
-- **Tool used:** [Miro / Lucidchart / physical whiteboard]
-- **Map iterations:** v1 (date), v2 (date)
+- **Source:** Análisis de 14 módulos de base de datos existentes
+- **Method:** Agrupación por cohesión funcional y acoplamiento de datos
+- **Team validation:** Cristofer (architecture) + Jhampier (implementation)
+- **Date:** Septiembre 2024
 
 ### Key decisions and discarded alternatives
 
 | Decision | Discarded alternative | Reason |
 |----------|----------------------|--------|
-| [Separate Context A and B] | [Have them in one] | [Business logic is different and they evolve at different rates] |
+| Separar Seating de Events | Mantener en Event Management | Seating tiene lógica tiempo real compleja (WebSockets) |
+| Payment + Wallet en mismo contexto | Wallet como contexto separado | Wallet es extensión natural de Payment, no dominio independiente |
+| Profile separado de Security | Profile dentro de Security | Profile tiene lógica de preferencias independiente de auth |
+| 7 contextos vs 14 módulos | Un contexto por módulo | Algunos módulos son técnicos (idiomas, temas) no de dominio |
 
 ---
 
 ## 6. How to update this map
 
-1. Before adding a new microservice, verify whether it belongs to an existing bounded context.
-2. If a context's ubiquitous language is changing, review whether the context should be split.
-3. Run an Event Storming session every time the domain changes significantly.
-4. The context map MUST be synchronized with the C4 system-level diagram (`05-architecture/overview.md`).
+1. **Before adding microservices:** Verificar si pertenece a contexto existente
+2. **Language evolution:** Si el lenguaje ubiquo cambia, revisar límites de contexto  
+3. **Database changes:** Mantener sincronía con módulos SQL en `DataBase/MR/`
+4. **Architecture sync:** Sincronizar con diagramas C4 en `05-architecture/overview.md`
 
-> **Important correlation:** The bounded contexts in this document →
-> Microservices in `09-microservices/service-catalog.md` →
-> C4 diagrams in `08-uml/` →
-> Service separation ADRs in `05-architecture/decisions/`
+> **Correlaciones importantes:**
+> - Bounded Contexts → `09-microservices/service-catalog.md`
+> - Módulos SQL → `TuEvento/DataBase/MR/DBML/`
+> - Arquitectura → `05-architecture/decisions/`
